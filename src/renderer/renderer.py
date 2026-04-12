@@ -263,17 +263,17 @@ class GaussianRenderer:
                 weight = torch.exp(-0.5 * maha.clamp(min=0.0, max=20.0)).detach()
                 alpha  = (alpha_i * weight).clamp(max=0.9999)
 
-                T_patch = transmittance[y0:y1, x0:x1].detach()
-                contrib = alpha * T_patch   # grad flows only via alpha_i (opacity)
+                T_patch = transmittance[y0 :y1, x0 :x1].clone()  # clone, not detach
+                contrib = alpha * T_patch  # grad flows only via alpha_i (opacity)
 
-                # Accumulate directly into canvas patch — no per-Gaussian full tensor
-                accumulated[:, y0:y1, x0:x1] = (
-                    accumulated[:, y0:y1, x0:x1]
-                    + contrib.unsqueeze(0) * colors[i].view(3, 1, 1)
+                accumulated[:, y0 :y1, x0 :x1] = (
+                        accumulated[:, y0 :y1, x0 :x1]
+                        + contrib.unsqueeze( 0 ) * colors[i].view( 3, 1, 1 )
                 )
 
-                # Transmittance: read via .detach(), write in-place is safe (not in graph)
-                transmittance[y0:y1, x0:x1] = T_patch * (1.0 - alpha.detach())
+                # Update transmittance fully out-of-place — alpha must be detached first
+                new_T = T_patch.detach() * (1.0 - alpha.detach())
+                transmittance[y0 :y1, x0 :x1] = new_T
 
             if batch_end % (self.batch_size * 10) == 0 or batch_end == total_gaussians:
                 if device == "cuda":
