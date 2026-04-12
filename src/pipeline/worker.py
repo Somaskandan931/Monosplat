@@ -132,8 +132,10 @@ def run_pipeline(
         n_frames = extract_from_video(
             str(input_path),
             output_dir=str(frames_dir),
-            fps=5,
-            max_frames=200,
+            fps=3,
+            max_frames=400,
+            blur_threshold=50.0,    # more lenient — keep more frames for COLMAP
+            adaptive_sampling=False, # disable scene-change filter; use steady fps
         )
         metrics["num_frames"] = n_frames
         _update_job(registry, job_id, num_images=n_frames)

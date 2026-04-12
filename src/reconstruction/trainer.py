@@ -1,19 +1,17 @@
 """
 trainer.py
-Training loop for 3D Gaussian Splatting.
+Training loop for 3D Gaussian Splatting — Object / Product / Architecture mode.
 
-Improvements:
-- torch.autograd.set_detect_anomaly(True) enabled at training entry point.
+Aligned with LeoDarcy/360GS training loop
+-----------------------------------------
+- percent_dense from config controls clone/split threshold (360GS style)
+- densify_grad_threshold from config (360GS default: 0.0002)
+- Exponential position LR decay using lambda scheduler (matches 360GS)
+- densify_and_split uses N=2 (360GS default)
+- Opacity reset every 3000 iters until densify_until_iter (360GS schedule)
+- PSNR/SSIM evaluation on test cameras at eval_every intervals
 - NaN loss check: skips iteration instead of crashing.
-- Exponential LR decay applied every iteration.
 - Gradient clipping: torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0).
-- Lower densification grad_threshold: 0.0001 (was 0.0002).
-- densification_interval: 100 (driven from config).
-- densify_until_iter extended to 70% of total iterations.
-- densify_and_split called alongside densify_and_clone.
-- Periodic render preview every 500 iterations saved to output directory.
-- _reset_opacity and _densify_and_prune zero_grad and rebuild optimizer before
-  any parameter replacement to cleanly discard autograd graph.
 """
 
 import math
@@ -25,12 +23,12 @@ import torch
 from tqdm import tqdm
 
 from .gaussian_model import GaussianModel
-from .loss import combined_loss
+from .loss import combined_loss, psnr_metric, ssim_metric
 from ..utils.io_utils import save_ply, save_checkpoint, load_checkpoint
 
 
 class GaussianTrainer:
-    """Trains a GaussianModel given training cameras and ground-truth images."""
+    """Trains a GaussianModel — object-centric, 360GS-aligned."""
 
     def __init__(
         self,
@@ -39,11 +37,15 @@ class GaussianTrainer:
         train_cameras,
         train_images,
         cfg,
+        test_cameras=None,
+        test_images=None,
     ):
         self.model    = model
         self.renderer = renderer
         self.cameras  = train_cameras
         self.images   = train_images
+        self.test_cameras = test_cameras or []
+        self.test_images  = test_images  or []
         self.cfg      = cfg
 
         self.output_dir = Path(cfg.training.output_dir)
@@ -51,7 +53,6 @@ class GaussianTrainer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-        # Preview directory for periodic renders
         self.preview_dir = self.output_dir / "previews"
         self.preview_dir.mkdir(parents=True, exist_ok=True)
 
@@ -60,21 +61,20 @@ class GaussianTrainer:
 
         if self.device == "cpu" and hasattr(cfg.training, 'iterations_cpu'):
             cfg.training.iterations = cfg.training.iterations_cpu
-            print(f"[Trainer] CPU mode: iterations reduced to {cfg.training.iterations}")
+            print(f"[Trainer] CPU mode: iterations → {cfg.training.iterations}")
 
         print(f"[Trainer] Device  : {self.device}")
         print(f"[Trainer] Output  : {self.output_dir.resolve()}")
-        print(f"[Trainer] Ckpts   : {self.ckpt_dir.resolve()}")
-        print(f"[Trainer] Previews: {self.preview_dir.resolve()}")
 
         self._grad_accum: Optional[torch.Tensor] = None
         self._grad_denom: Optional[torch.Tensor] = None
         self.last_metrics: dict = {}
+        self.eval_log: list = []
 
         self._setup_optimizer()
 
     # ------------------------------------------------------------------
-    # Optimizer
+    # Optimizer — matches 360GS param group structure
     # ------------------------------------------------------------------
 
     def _setup_optimizer(self) -> None:
@@ -88,16 +88,19 @@ class GaussianTrainer:
             {"params": [self.model._rotations],     "lr": lr.rotation,       "name": "rotation"},
         ]
         self.optimizer = torch.optim.Adam(param_groups, lr=0.0, eps=1e-15)
-        # Store base LRs for exponential decay
         self._base_lrs = {g["name"]: g["lr"] for g in param_groups}
 
-    def _apply_lr_decay(self, iteration: int, total_iterations: int) -> None:
-        """Exponential LR decay: lr = base_lr * exp(-5 * progress)."""
+    def _apply_position_lr_decay(self, iteration: int, total_iterations: int) -> None:
+        """
+        Exponential position LR decay matching 360GS:
+            lr = base_lr * exp(-5 * progress)   [position only]
+        Other param groups use fixed LR (360GS does not decay them).
+        """
         progress = iteration / max(total_iterations, 1)
         decay    = math.exp(-5.0 * progress)
         for group in self.optimizer.param_groups:
-            base = self._base_lrs.get(group["name"], group["lr"])
-            group["lr"] = base * decay
+            if group["name"] == "position":
+                group["lr"] = self._base_lrs["position"] * decay
 
     # ------------------------------------------------------------------
     # Main training loop
@@ -109,15 +112,20 @@ class GaussianTrainer:
         on_iter_callback: Optional[Callable[[int, float], None]] = None,
         callback_every: int = 500,
     ) -> None:
-        # Enable anomaly detection for debugging autograd issues
         torch.autograd.set_detect_anomaly(True)
 
         cfg        = self.cfg.training
         iterations = cfg.iterations
         save_every = cfg.save_every
+        eval_every = getattr(cfg, "eval_every", 1000)
 
-        # Always derive from actual iterations — config value may be stale
-        densify_until = int(iterations * 0.7)
+        densify_from     = getattr(cfg, "densify_from_iter", 500)
+        densify_until    = getattr(cfg, "densify_until_iter", 15000)
+        densify_interval = getattr(cfg, "densification_interval", 100)
+        grad_threshold   = getattr(cfg, "densify_grad_threshold", 0.0002)  # 360GS default
+        percent_dense    = getattr(cfg, "percent_dense", 0.01)             # 360GS default
+        opacity_reset_interval = getattr(cfg, "opacity_reset_interval", 3000)
+        lambda_dssim     = getattr(cfg, "lambda_dssim", 0.2)
 
         n = len(self.model)
         self._grad_accum = torch.zeros(n, device=self.device)
@@ -131,15 +139,13 @@ class GaussianTrainer:
         for it in pbar:
             idx    = np.random.randint(len(self.cameras))
             camera = self.cameras[idx]
-            # Move to device on demand — keeps all training images on CPU to save VRAM
             gt_img = self.images[idx].to(self.device, non_blocking=True)
 
             self.optimizer.zero_grad(set_to_none=True)
 
             rendered = self.renderer(self.model, camera)
-            loss     = combined_loss(rendered, gt_img)
+            loss     = combined_loss(rendered, gt_img, lambda_ssim=lambda_dssim)
 
-            # NaN check — skip iteration instead of crashing
             if torch.isnan(loss):
                 nan_count += 1
                 if nan_count <= 10 or nan_count % 100 == 0:
@@ -147,8 +153,6 @@ class GaussianTrainer:
                 continue
 
             loss.backward()
-
-            # Gradient clipping for stability
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1.0)
 
             if self.model._positions.grad is not None:
@@ -158,31 +162,35 @@ class GaussianTrainer:
                     self._grad_denom += 1.0
 
             self.optimizer.step()
-
-            # Exponential LR decay every iteration
-            self._apply_lr_decay(it, iterations)
+            self._apply_position_lr_decay(it, iterations)
 
             loss_val      = loss.item()
             running_loss += loss_val
 
+            # ── SH degree scheduling (360GS: every 1000 iters) ──────
             if it % 1000 == 0:
                 self.model.oneup_sh_degree()
 
-            densify_from = getattr(cfg, "densify_from_iter", 500)
-            densify_interval = getattr(cfg, "densification_interval", 100)
+            # ── Densification (360GS schedule) ──────────────────────
+            if densify_from <= it <= densify_until and it % densify_interval == 0:
+                self._densify_and_prune(
+                    grad_threshold=grad_threshold,
+                    percent_dense=percent_dense,
+                )
 
-            if (densify_from <= it <= densify_until
-                    and it % densify_interval == 0):
-                self._densify_and_prune()
-
-            opacity_reset_interval = getattr(cfg, "opacity_reset_interval", 2000)
+            # ── Opacity reset (360GS schedule) ──────────────────────
             if it > 0 and it % opacity_reset_interval == 0 and it < densify_until:
                 self._reset_opacity()
 
+            # ── Checkpoint + PLY save ────────────────────────────────
             if it > 0 and it % save_every == 0:
                 self._save(it)
 
-            # Periodic render preview every 500 iterations
+            # ── Evaluation on test split (360GS style) ───────────────
+            if it > 0 and it % eval_every == 0 and self.test_cameras:
+                self._evaluate(it)
+
+            # ── Preview render ───────────────────────────────────────
             if it > 0 and it % 500 == 0:
                 self._save_preview(it, camera)
 
@@ -196,13 +204,12 @@ class GaussianTrainer:
                 except Exception:
                     pass
 
-            # Clear cache after preview and callbacks to reclaim any temporary allocations
             if self.device == "cuda" and it % 500 == 0:
                 torch.cuda.empty_cache()
 
         self._save(iterations)
-        print(f"[Trainer] Training complete. Model saved to {self.output_dir}")
-        if nan_count > 0:
+        print(f"[Trainer] Training complete. Output: {self.output_dir}")
+        if nan_count:
             print(f"[Trainer] Total NaN iterations skipped: {nan_count}")
 
         self.last_metrics = {
@@ -213,24 +220,30 @@ class GaussianTrainer:
         }
 
     # ------------------------------------------------------------------
-    # Densification and pruning
+    # Densification + pruning (360GS-style)
     # ------------------------------------------------------------------
 
-    def _densify_and_prune(self) -> None:
+    def _densify_and_prune(
+        self,
+        grad_threshold: float = 0.0002,
+        percent_dense: float  = 0.01,
+    ) -> None:
         avg_grads    = self._grad_accum / (self._grad_denom + 1e-8)
         scene_extent = self.model.positions.detach().norm(dim=1).max().item()
 
-        # Drop autograd graph BEFORE touching parameters
         self.optimizer.zero_grad(set_to_none=True)
 
-        # FIX: lower grad_threshold 0.0001 (was 0.0002) for more aggressive densification
         self.model.densify_and_clone(
-            avg_grads, grad_threshold=0.0001, scene_extent=scene_extent
+            avg_grads, grad_threshold=grad_threshold,
+            scene_extent=scene_extent, percent_dense=percent_dense,
         )
         self.model.densify_and_split(
-            avg_grads, grad_threshold=0.0001, scene_extent=scene_extent
+            avg_grads, grad_threshold=grad_threshold,
+            scene_extent=scene_extent, percent_dense=percent_dense,
+            N=2,   # 360GS uses N=2
         )
 
+        # Prune: opacity too low OR Gaussian too large
         prune_mask = (
             (self.model.opacities.squeeze() < 0.005) |
             (self.model.scales.max(dim=1).values > 0.1 * scene_extent)
@@ -238,7 +251,7 @@ class GaussianTrainer:
 
         max_gaussians = self.cfg.renderer.max_gaussians
         if len(self.model) > max_gaussians:
-            n_prune    = len(self.model) - max_gaussians
+            n_prune = len(self.model) - max_gaussians
             opacity_flat = self.model.opacities.squeeze()
             _, low_idx = opacity_flat.topk(n_prune, largest=False)
             budget_mask = torch.zeros(len(self.model), dtype=torch.bool, device=self.device)
@@ -251,45 +264,53 @@ class GaussianTrainer:
         n = len(self.model)
         self._grad_accum = torch.zeros(n, device=self.device)
         self._grad_denom = torch.zeros(n, device=self.device)
-
-        # Rebuild optimizer AFTER parameter replacement
         self._setup_optimizer()
 
         if self.device == "cuda":
             torch.cuda.empty_cache()
 
     # ------------------------------------------------------------------
-    # Opacity reset
+    # Opacity reset (360GS style)
     # ------------------------------------------------------------------
 
     def _reset_opacity(self) -> None:
-        """Reset opacities without any in-place mutation of a grad-tracked tensor."""
-        # Step 1: drop current autograd graph
         self.optimizer.zero_grad(set_to_none=True)
-
-        # Step 2: save reference to old parameter so we can clear its optimizer state
         old_opacity_param = self.model._opacities
-
-        # Step 3: replace parameter fully out-of-place
         with torch.no_grad():
             new_opacities = old_opacity_param.detach().clamp(max=-4.595)
         self.model._opacities = torch.nn.Parameter(new_opacities)
-
-        # Step 4: point the optimizer at the new Parameter and clear old state
         for group in self.optimizer.param_groups:
             if group.get("name") == "opacity":
                 self.optimizer.state.pop(old_opacity_param, None)
                 group["params"] = [self.model._opacities]
                 break
-
         print("[Trainer] Opacity reset.")
+
+    # ------------------------------------------------------------------
+    # Evaluation (PSNR + SSIM — matches 360GS metrics.py)
+    # ------------------------------------------------------------------
+
+    def _evaluate(self, iteration: int) -> None:
+        self.model.eval()
+        psnrs, ssims = [], []
+        with torch.no_grad():
+            for cam, gt in zip(self.test_cameras, self.test_images):
+                rendered = self.renderer(self.model, cam)
+                gt_dev   = gt.to(self.device)
+                psnrs.append(psnr_metric(rendered, gt_dev).item())
+                ssims.append((1.0 - ssim_metric(rendered, gt_dev)).item())  # ssim_metric returns (1-SSIM)
+        self.model.train()
+        avg_psnr = np.mean(psnrs)
+        avg_ssim = 1.0 - np.mean(ssims)  # convert back to SSIM ↑
+        record = {"iter": iteration, "psnr": round(avg_psnr, 3), "ssim": round(avg_ssim, 4)}
+        self.eval_log.append(record)
+        print(f"[Eval  ] iter={iteration:6d}  PSNR={avg_psnr:.2f} dB  SSIM={avg_ssim:.4f}")
 
     # ------------------------------------------------------------------
     # Preview render
     # ------------------------------------------------------------------
 
     def _save_preview(self, iteration: int, camera) -> None:
-        """Save a preview render image every 500 iterations."""
         try:
             import numpy as np
             from PIL import Image
@@ -297,8 +318,7 @@ class GaussianTrainer:
                 rendered = self.renderer(self.model, camera)
             img_np = rendered.detach().cpu().permute(1, 2, 0).numpy()
             img_np = (img_np * 255).clip(0, 255).astype(np.uint8)
-            preview_path = self.preview_dir / f"preview_{iteration:06d}.png"
-            Image.fromarray(img_np).save(str(preview_path))
+            Image.fromarray(img_np).save(str(self.preview_dir / f"preview_{iteration:06d}.png"))
         except Exception as e:
             print(f"[Trainer] Preview save failed at iter {iteration}: {e}")
 

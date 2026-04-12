@@ -140,7 +140,7 @@ def run_colmap(
     colmap_binary: str  = "colmap",
     camera_model:  str  = "OPENCV",
     single_camera: bool = True,
-    quality:       str  = "high",   # default to high for better registration
+    quality:       str  = "medium",   # default to medium — high is too strict for small point clouds
     use_gpu:       bool = False,
     force_gpu:     bool = False,
     on_progress:   Optional[Callable[[str, str], None]] = None,
@@ -211,9 +211,9 @@ def run_colmap(
         "--ImageReader.camera_model",  camera_model,
         "--ImageReader.single_camera", "1" if single_camera else "0",
         # IMPROVED: Higher feature count for better matches
-        "--SiftExtraction.max_num_features", "20000",
-        "--SiftExtraction.peak_threshold",   "0.004",   # More selective
-        "--SiftExtraction.edge_threshold",   "10",      # Remove edge-like features
+        "--SiftExtraction.max_num_features", "30000",
+        "--SiftExtraction.peak_threshold",   "0.003",   # less selective = more features
+        "--SiftExtraction.edge_threshold",   "15",      # keep more features near edges
     ]
     _run_or_die(extraction_cmd, "Feature Extraction", on_progress)
 
@@ -224,9 +224,9 @@ def run_colmap(
 
     # Quality-based overlap settings
     _overlap_settings = {
-        "low":    {"overlap": 5},
-        "medium": {"overlap": 10},
-        "high":   {"overlap": 15},   # Increased overlap for better matching
+        "low":    {"overlap": 10},
+        "medium": {"overlap": 20},
+        "high":   {"overlap": 30},   # large overlap for dense matching
     }
     qs = _overlap_settings.get(quality, _overlap_settings["high"])
 
@@ -253,9 +253,9 @@ def run_colmap(
 
     # ---- 3. Sparse reconstruction (SfM) with aggressive filtering ---------
     _mapper_quality = {
-        "low":    {"min_num_matches": 10, "init_min_num_inliers": 30,  "abs_pose_min_num_inliers": 15},
-        "medium": {"min_num_matches": 15, "init_min_num_inliers": 50,  "abs_pose_min_num_inliers": 25},
-        "high":   {"min_num_matches": 20, "init_min_num_inliers": 100, "abs_pose_min_num_inliers": 50},
+        "low":    {"min_num_matches": 5,  "init_min_num_inliers": 15,  "abs_pose_min_num_inliers": 8},
+        "medium": {"min_num_matches": 10, "init_min_num_inliers": 30,  "abs_pose_min_num_inliers": 15},
+        "high":   {"min_num_matches": 15, "init_min_num_inliers": 50,  "abs_pose_min_num_inliers": 25},
     }
     mq = _mapper_quality.get(quality, _mapper_quality["high"])
 

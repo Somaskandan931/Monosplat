@@ -204,10 +204,10 @@ def filter_blurry_images(image_dir: str, threshold: float = 120.0) -> int:
 def extract_from_video(
     video_path:  str,
     output_dir:  str,
-    fps:         float = 2.0,       # CHANGED: reduced from 5 to 2 for cleaner frames
-    max_frames:  int   = 200,
-    blur_threshold: float = 120.0,  # NEW: filter blurry frames
-    adaptive_sampling: bool = True,  # NEW: scene-change detection
+    fps:         float = 3.0,
+    max_frames:  int   = 400,
+    blur_threshold: float = 50.0,   # very lenient — COLMAP handles blurry better than missing frames
+    adaptive_sampling: bool = False, # disabled — steady fps gives better COLMAP overlap
 ) -> int:
     """
     Extract frames from *video_path* using FFmpeg with smart sampling.
@@ -335,8 +335,8 @@ def validate_images(image_dir: str) -> None:
 
 def filter_low_feature_frames(
     image_dir: str,
-    min_features: int = 3000,
-    min_keep_ratio: float = 0.5,
+    min_features: int = 500,        # lowered from 3000 — keep more frames for COLMAP
+    min_keep_ratio: float = 0.7,    # keep at least 70% of frames
 ) -> int:
     """
     Remove frames that are too featureless for COLMAP to use.
