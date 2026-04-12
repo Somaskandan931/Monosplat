@@ -1,0 +1,46 @@
+# Core
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+
+# Image / Video
+# NOTE: FFmpeg handles video extraction — install FFmpeg separately:
+#   Ubuntu:  sudo apt install ffmpeg
+#   macOS:   brew install ffmpeg
+#   Windows: https://ffmpeg.org/download.html
+Pillow>=9.5.0
+imageio>=2.31.0
+
+# 3D / Math
+scipy>=1.10.0
+plyfile>=0.8.1   # Required for RealityScan PLY point cloud → points3D.txt conversion
+
+# Web Server (browser viewer — no OpenGL needed)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+python-multipart>=0.0.6
+aiofiles>=23.0.0
+
+# Config & Utilities
+PyYAML>=6.0
+tqdm>=4.65.0
+rich>=13.0.0
+
+# Notebook (Colab training)
+jupyter>=1.0.0
+matplotlib>=3.7.0
+
+# ── External tools (install separately) ───────────────────────────────────
+#
+# FFmpeg — frame extraction (Stage 1)
+#   Ubuntu:  sudo apt install ffmpeg
+#   macOS:   brew install ffmpeg
+#   Windows: https://ffmpeg.org/download.html
+#
+# RealityScan / RealityCapture — SfM pose estimation (Stage 2)
+#   Download: https://www.capturingreality.com/
+#   Free tier available; add CLI binary to PATH or set realityscan.binary_path in config.yaml
+#
+# Lichtfeld — Gaussian Splat training (Stage 3, GPU)
+#   Runs via the included trainer.py on Colab T4 GPU.
+#   No separate install required — uses the src/ package in this repo.

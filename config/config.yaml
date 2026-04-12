@@ -1,0 +1,57 @@
+project:
+  name: "Gaussian XR Viewer"
+  version: "1.0.0"
+
+data:
+  raw_dir: "data/raw"
+  processed_dir: "data/processed"
+  colmap_output_dir: "data/colmap_output"
+  image_extensions: [".jpg", ".jpeg", ".png"]
+  video_fps: 5
+  max_frames: 200
+
+colmap:
+  binary_path: "colmap"
+  quality: "medium"
+  camera_model: "OPENCV"
+  single_camera: true
+
+training:
+  output_dir: "models/gaussian"
+  checkpoint_dir: "models/checkpoints"
+  iterations: 30000
+  iterations_cpu: 1000       # CPU fallback
+  save_every: 1000
+  learning_rate:
+    position: 0.00016
+    feature: 0.0025
+    opacity: 0.05
+    scaling: 0.005
+    rotation: 0.001
+  densify_from_iter: 500
+  densify_until_iter: 21000  # 70% of 30000
+  densification_interval: 100
+  opacity_reset_interval: 3000
+
+renderer:
+  background_color: [0.0, 0.0, 0.0]
+  sh_degree: 1               # degree 1 is sufficient and saves VRAM on free Colab
+  max_gaussians: 200000      # safe cap for T4 15GB free tier
+
+viewer:
+  window_width: 640          # half of 1280 — quarters per-frame VRAM cost
+  window_height: 360         # half of 720
+  window_title: "Gaussian XR Viewer"
+  target_fps: 60
+  fov_degrees: 60.0
+  near_plane: 0.01
+  far_plane: 100.0
+  movement_speed: 0.05
+  mouse_sensitivity: 0.003
+  show_fps: true
+  show_controls: true
+
+output:
+  renders_dir: "outputs/renders"
+  logs_dir: "outputs/logs"
+  videos_dir: "outputs/videos"

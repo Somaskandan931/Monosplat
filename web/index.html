@@ -1,0 +1,819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MonoSplat — Single-Camera 3D Gaussian Pipeline</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Barlow+Condensed:wght@300;500;700;900&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #0a0c0f;
+    --surface:  #111418;
+    --border:   #1e2530;
+    --accent:   #00e5a0;
+    --amber:    #ffb700;
+    --danger:   #ff4757;
+    --text:     #c8d0dc;
+    --muted:    #4a5568;
+    --mono:     'Space Mono', monospace;
+    --display:  'Barlow Condensed', sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg); color: var(--text);
+    font-family: var(--mono); font-size: 13px; min-height: 100vh;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, transparent, transparent 2px,
+      rgba(0,229,160,0.01) 2px, rgba(0,229,160,0.01) 4px);
+    pointer-events: none; z-index: 9999;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 40px; border-bottom: 1px solid var(--border);
+    background: rgba(10,12,15,0.95); position: sticky; top: 0;
+    z-index: 100; backdrop-filter: blur(10px);
+  }
+  .logo {
+    font-family: var(--display); font-size: 26px; font-weight: 900;
+    text-transform: uppercase; letter-spacing: 0.06em; color: #fff;
+  }
+  .logo span { color: var(--accent); }
+  .logo sub {
+    font-size: 11px; font-weight: 300; color: var(--muted);
+    letter-spacing: 0.1em; margin-left: 8px; vertical-align: middle;
+  }
+  .header-status {
+    font-size: 11px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.08em;
+    display: flex; align-items: center; gap: 20px;
+  }
+  .dot {
+    display: inline-block; width: 6px; height: 6px; border-radius: 50%;
+    background: var(--accent); box-shadow: 0 0 6px var(--accent);
+    animation: blink 2s infinite; margin-right: 6px;
+  }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+  .layout {
+    display: grid; grid-template-columns: 1fr 400px;
+    min-height: calc(100vh - 57px);
+  }
+  .left { padding: 40px; border-right: 1px solid var(--border); }
+  .section-label {
+    font-family: var(--display); font-size: 10px; font-weight: 700;
+    letter-spacing: 0.18em; text-transform: uppercase; color: var(--accent);
+    margin-bottom: 18px; display: flex; align-items: center; gap: 10px;
+  }
+  .section-label::after { content:''; flex:1; height:1px; background: var(--border); }
+  .headline {
+    font-family: var(--display); font-size: 58px; font-weight: 900;
+    line-height: 1.0; text-transform: uppercase; color: #fff;
+    letter-spacing: -0.01em; margin-bottom: 8px;
+  }
+  .headline em { color: var(--accent); font-style: normal; }
+  .subline {
+    color: var(--muted); font-size: 12px; line-height: 1.7;
+    max-width: 500px; margin-bottom: 36px;
+  }
+  .pipeline {
+    display: flex; align-items: center; gap: 0;
+    margin-bottom: 36px; max-width: 560px;
+  }
+  .step {
+    flex: 1; padding: 10px 12px; background: var(--surface);
+    border: 1px solid var(--border); text-align: center;
+  }
+  .step:first-child { border-radius: 4px 0 0 4px; }
+  .step:last-child  { border-radius: 0 4px 4px 0; }
+  .step-num {
+    display: block; font-size: 9px; font-weight: 700;
+    color: var(--accent); letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 3px;
+  }
+  .step-name { font-family: var(--display); font-size: 13px; font-weight: 700; text-transform: uppercase; color: #fff; }
+  .step-tool { font-size: 9px; color: var(--muted); margin-top: 2px; }
+  .arrow { color: var(--border); font-size: 16px; flex-shrink: 0; padding: 0 2px; }
+  .field-group { margin-bottom: 20px; }
+  .field-label {
+    display: block; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 8px;
+  }
+  .field-input {
+    width: 100%; max-width: 520px; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 4px;
+    padding: 14px 18px; color: #fff; font-family: var(--mono);
+    font-size: 14px; outline: none; transition: border-color 0.2s;
+  }
+  .field-input::placeholder { color: var(--muted); }
+  .field-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(0,229,160,0.08); }
+  .dropzone {
+    border: 2px dashed var(--border); border-radius: 8px; padding: 48px 40px;
+    text-align: center; cursor: pointer; max-width: 560px;
+    background: var(--surface); position: relative; overflow: hidden;
+    transition: all 0.25s; margin-bottom: 16px;
+  }
+  .dropzone::before {
+    content: ''; position: absolute; inset: 0;
+    background: radial-gradient(ellipse at 50% 120%, rgba(0,229,160,0.05) 0%, transparent 70%);
+    pointer-events: none;
+  }
+  .dropzone.drag-over { border-color: var(--accent); background: rgba(0,229,160,0.04); transform: scale(1.005); }
+  .dropzone-icon { font-size: 44px; display: block; margin-bottom: 14px; }
+  .dropzone h3 {
+    font-family: var(--display); font-size: 20px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; color: #fff; margin-bottom: 6px;
+  }
+  .dropzone p { color: var(--muted); font-size: 12px; line-height: 1.6; }
+  .dropzone p strong { color: var(--text); }
+  #file-input { display: none; }
+  .selected-file {
+    max-width: 560px; display: none; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 6px; padding: 14px 18px;
+    margin-bottom: 16px; align-items: center; gap: 14px;
+  }
+  .selected-file.show { display: flex; }
+  .file-icon-big { font-size: 28px; }
+  .file-info { flex: 1; }
+  .file-info .fname { color: #fff; font-size: 13px; margin-bottom: 3px; }
+  .file-info .fmeta { color: var(--muted); font-size: 11px; }
+  .file-remove-btn {
+    background: none; border: 1px solid var(--border); border-radius: 3px;
+    padding: 6px 10px; color: var(--muted); font-size: 11px; cursor: pointer;
+    transition: all 0.15s; font-family: var(--mono);
+  }
+  .file-remove-btn:hover { border-color: var(--danger); color: var(--danger); }
+  .btn-submit {
+    max-width: 560px; width: 100%; padding: 17px; background: var(--accent);
+    color: #000; font-family: var(--display); font-size: 18px; font-weight: 900;
+    text-transform: uppercase; letter-spacing: 0.1em; border: none;
+    border-radius: 4px; cursor: pointer; transition: all 0.2s; margin-bottom: 28px;
+  }
+  .btn-submit:hover:not(:disabled) { background: #00ffb3; transform: translateY(-1px); }
+  .btn-submit:disabled { background: var(--border); color: var(--muted); cursor: not-allowed; transform: none; }
+  .guide { max-width: 560px; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+  .guide-header {
+    background: var(--surface); padding: 12px 18px;
+    font-family: var(--display); font-size: 12px; font-weight: 700;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--amber);
+  }
+  .guide-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; padding: 16px; }
+  .tip { display: flex; gap: 10px; align-items: flex-start; }
+  .tip-n {
+    width: 20px; height: 20px; flex-shrink: 0;
+    background: rgba(255,183,0,0.1); border: 1px solid var(--amber);
+    border-radius: 3px; display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: var(--amber);
+  }
+  .tip-t { font-size: 11px; color: var(--muted); line-height: 1.5; }
+  .tip-t strong { color: var(--text); }
+  .right { padding: 32px 24px; overflow-y: auto; max-height: calc(100vh - 57px); }
+  .right::-webkit-scrollbar { width: 4px; }
+  .right::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+  .empty-state {
+    display: flex; flex-direction: column; align-items: center;
+    justify-content: center; height: 300px; gap: 12px;
+    color: var(--muted); text-align: center;
+  }
+  .empty-icon { font-size: 36px; opacity: 0.3; }
+  .job-card {
+    border: 1px solid var(--border); border-radius: 6px; padding: 16px;
+    margin-bottom: 12px; background: var(--surface);
+    animation: slideIn 0.3s ease;
+  }
+  @keyframes slideIn { from{opacity:0;transform:translateX(16px)} to{opacity:1;transform:none} }
+  .job-card.s-ready    { border-color: rgba(0,229,160,0.3); }
+  .job-card.s-training { border-color: rgba(255,183,0,0.2); }
+  .job-card.s-colmap   { border-color: rgba(100,120,255,0.2); }
+  .job-card.s-extracting { border-color: rgba(100,120,255,0.15); }
+  .job-card.s-failed   { border-color: rgba(255,71,87,0.25); }
+  .job-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .job-name {
+    font-family: var(--display); font-size: 17px; font-weight: 700;
+    text-transform: uppercase; color: #fff; letter-spacing: 0.03em;
+  }
+  .badge {
+    font-size: 9px; font-weight: 700; letter-spacing: 0.1em;
+    text-transform: uppercase; padding: 3px 8px; border-radius: 3px; flex-shrink: 0;
+  }
+  .b-waiting    { background:rgba(74,85,104,0.4);   color:var(--muted); }
+  .b-extracting { background:rgba(100,120,255,0.2); color:#8899ff; }
+  .b-colmap     { background:rgba(100,120,255,0.2); color:#8899ff; }
+  .b-training   { background:rgba(255,183,0,0.2);   color:var(--amber); }
+  .b-exporting  { background:rgba(0,229,160,0.1);   color:var(--accent); }
+  .b-ready      { background:rgba(0,229,160,0.15);  color:var(--accent); }
+  .b-failed     { background:rgba(255,71,87,0.2);   color:var(--danger); }
+  .job-meta { color: var(--muted); font-size: 10px; margin-bottom: 8px; }
+  .job-msg  { color: var(--text); font-size: 11px; margin-bottom: 10px; min-height: 16px; }
+  .progress-track { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-bottom: 10px; }
+  .progress-fill { height: 100%; border-radius: 2px; transition: width 0.5s ease; }
+  .pf-active { background: linear-gradient(90deg, var(--amber), var(--accent)); }
+  .pf-ready  { background: var(--accent); }
+  .pf-failed { background: var(--danger); }
+
+  /* ── GOD MODE: Stage pipeline tracker ── */
+  .stage-track {
+    display: flex; gap: 2px; margin-bottom: 10px; align-items: center;
+  }
+  .stage-step {
+    display: flex; align-items: center; gap: 5px; font-size: 9px;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+    flex-shrink: 0;
+  }
+  .stage-icon { font-size: 11px; }
+  .stage-step.done  { color: var(--accent); }
+  .stage-step.active { color: var(--amber); animation: stagePulse 1.5s infinite; }
+  .stage-step.failed { color: var(--danger); }
+  .stage-sep { flex: 1; height: 1px; background: var(--border); min-width: 6px; }
+  @keyframes stagePulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+  /* ── Metrics row ── */
+  .metrics-row {
+    display: flex; gap: 12px; margin-bottom: 8px; flex-wrap: wrap;
+  }
+  .metric-chip {
+    background: rgba(0,229,160,0.06); border: 1px solid rgba(0,229,160,0.15);
+    border-radius: 3px; padding: 3px 8px; font-size: 10px;
+  }
+  .metric-chip .mk { color: var(--muted); margin-right: 4px; }
+  .metric-chip .mv { color: var(--accent); font-weight: 700; }
+
+  .btn-view {
+    display: block; width: 100%; padding: 10px; text-align: center;
+    background: rgba(0,229,160,0.08); border: 1px solid rgba(0,229,160,0.25);
+    border-radius: 4px; color: var(--accent); font-family: var(--display);
+    font-size: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
+    text-decoration: none; margin-top: 6px; transition: all 0.2s;
+  }
+  .btn-view:hover { background: rgba(0,229,160,0.15); border-color: var(--accent); }
+  .btn-download {
+    display: inline-block; margin-top: 6px; padding: 7px 14px;
+    background: transparent; border: 1px solid var(--border); border-radius: 4px;
+    color: var(--muted); font-size: 10px; text-decoration: none; letter-spacing: 0.08em;
+    text-transform: uppercase; transition: all 0.2s; font-family: var(--mono);
+  }
+  .btn-download:hover { border-color: var(--text); color: var(--text); }
+  .btn-delete {
+    float: right; background: none; border: 1px solid var(--border);
+    border-radius: 3px; padding: 3px 8px; color: var(--muted);
+    font-family: var(--mono); font-size: 9px; letter-spacing: 0.08em;
+    text-transform: uppercase; cursor: pointer; transition: all 0.15s;
+  }
+  .btn-delete:hover { border-color: var(--danger); color: var(--danger); }
+
+  /* ── Colab next-steps panel ── */
+  .colab-panel {
+    display: none; margin-top: 10px;
+    border: 1px solid rgba(255,183,0,0.35); border-radius: 6px; overflow: hidden;
+  }
+  .colab-panel.show { display: block; animation: slideIn 0.3s ease; }
+  .colab-header {
+    background: rgba(255,183,0,0.1); padding: 10px 14px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .colab-header-icon { font-size: 15px; }
+  .colab-header-title {
+    font-family: var(--display); font-size: 13px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.08em; color: var(--amber); flex: 1;
+  }
+  .colab-header-sub { font-size: 10px; color: var(--muted); }
+  .colab-body { padding: 14px; background: var(--surface); }
+  .colab-step {
+    display: flex; gap: 10px; align-items: flex-start; margin-bottom: 12px;
+  }
+  .colab-step:last-child { margin-bottom: 0; }
+  .colab-step-n {
+    width: 20px; height: 20px; flex-shrink: 0; border-radius: 3px;
+    background: rgba(255,183,0,0.12); border: 1px solid var(--amber);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: var(--amber);
+  }
+  .colab-step-body { flex: 1; font-size: 11px; color: var(--muted); line-height: 1.55; }
+  .colab-step-body strong { color: var(--text); }
+  .colab-code {
+    display: block; margin-top: 5px;
+    background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+    border-radius: 3px; padding: 6px 10px;
+    font-family: var(--mono); font-size: 10px; color: var(--accent);
+    white-space: pre-wrap; word-break: break-all;
+  }
+  .colab-copy-btn {
+    display: inline-block; margin-top: 5px; padding: 4px 10px;
+    background: transparent; border: 1px solid var(--border); border-radius: 3px;
+    color: var(--muted); font-size: 10px; cursor: pointer; font-family: var(--mono);
+    transition: all 0.15s;
+  }
+  .colab-copy-btn:hover { border-color: var(--amber); color: var(--amber); }
+  .btn-colab {
+    display: block; width: 100%; margin-top: 10px; padding: 9px;
+    background: rgba(255,183,0,0.1); border: 1px solid rgba(255,183,0,0.3);
+    border-radius: 4px; color: var(--amber); font-family: var(--display);
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em;
+    text-decoration: none; text-align: center; transition: all 0.2s;
+  }
+  .btn-colab:hover { background: rgba(255,183,0,0.18); border-color: var(--amber); }
+  #toasts { position: fixed; bottom: 24px; right: 24px; display: flex; flex-direction: column; gap: 8px; z-index: 9000; }
+  .toast {
+    background: var(--surface); border: 1px solid var(--accent); border-radius: 6px;
+    padding: 12px 18px; max-width: 300px; animation: toastIn 0.3s ease;
+    box-shadow: 0 8px 24px rgba(0,229,160,0.12);
+  }
+  .toast.err { border-color: var(--danger); }
+  @keyframes toastIn { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:none} }
+  .toast-title {
+    font-family: var(--display); font-size: 13px; font-weight: 700;
+    text-transform: uppercase; color: var(--accent); margin-bottom: 3px;
+  }
+  .toast.err .toast-title { color: var(--danger); }
+  .toast-msg { font-size: 11px; color: var(--muted); line-height: 1.4; }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">Mono<span>Splat</span><sub>Single-Camera 3D Gaussian Pipeline</sub></div>
+  <div class="header-status">
+    <span><span class="dot"></span>Pipeline Active</span>
+    <span id="hdr-ready">0 Models Ready</span>
+    <span id="hdr-queue">0 In Queue</span>
+  </div>
+</header>
+
+<div class="layout">
+  <div class="left">
+    <div class="section-label">Upload</div>
+    <h1 class="headline">Video<br>to <em>3D</em><br>Splat</h1>
+    <p class="subline">
+      Record a 20-30 second walk-around video of any object or scene.
+      Upload it here — frames are extracted, camera poses estimated by COLMAP,
+      and a Gaussian Splat trained automatically. View the result live in your browser.
+    </p>
+
+    <div class="pipeline">
+      <div class="step"><span class="step-num">01</span><div class="step-name">Video</div><div class="step-tool">MP4 / MOV</div></div>
+      <span class="arrow">›</span>
+      <div class="step"><span class="step-num">02</span><div class="step-name">Frames</div><div class="step-tool">FFmpeg</div></div>
+      <span class="arrow">›</span>
+      <div class="step"><span class="step-num">03</span><div class="step-name">Poses</div><div class="step-tool">COLMAP</div></div>
+      <span class="arrow">›</span>
+      <div class="step"><span class="step-num">04</span><div class="step-name">Train</div><div class="step-tool">PyTorch</div></div>
+      <span class="arrow">›</span>
+      <div class="step"><span class="step-num">05</span><div class="step-name">View</div><div class="step-tool">Browser</div></div>
+    </div>
+
+    <div class="field-group">
+      <label class="field-label" for="scene-name">Scene / Object Name</label>
+      <input class="field-input" id="scene-name" type="text"
+        placeholder="e.g.  Red Chair   or   Office Desk   or   Product #42" autocomplete="off">
+    </div>
+
+    <input type="file" id="file-input" accept="video/mp4,video/quicktime,video/x-msvideo,video/*">
+    <div class="dropzone" id="dropzone">
+      <span class="dropzone-icon">&#127909;</span>
+      <h3>Drop your video here</h3>
+      <p>Drag & drop or <strong>click to browse</strong><br>
+      MP4 &middot; MOV &middot; AVI &middot; MKV &mdash; 10 to 60 seconds recommended</p>
+    </div>
+
+    <div class="selected-file" id="selected-file">
+      <span class="file-icon-big">&#127909;</span>
+      <div class="file-info">
+        <div class="fname" id="fname">—</div>
+        <div class="fmeta" id="fmeta">—</div>
+      </div>
+      <button class="file-remove-btn" id="remove-btn">Remove</button>
+    </div>
+
+    <button class="btn-submit" id="submit-btn" disabled>Upload &amp; Start Pipeline</button>
+
+    <div class="guide">
+      <div class="guide-header">Video Capture Guide</div>
+      <div class="guide-grid">
+        <div class="tip"><div class="tip-n">1</div><div class="tip-t"><strong>20-30 seconds</strong> is ideal. Walk slowly.</div></div>
+        <div class="tip"><div class="tip-n">2</div><div class="tip-t"><strong>Full 360 circle</strong> around the subject.</div></div>
+        <div class="tip"><div class="tip-n">3</div><div class="tip-t"><strong>Multiple heights</strong> — top, middle, low angles.</div></div>
+        <div class="tip"><div class="tip-n">4</div><div class="tip-t"><strong>Steady lighting</strong>, no harsh flash or shadows.</div></div>
+        <div class="tip"><div class="tip-n">5</div><div class="tip-t"><strong>No fast movement</strong> — avoid motion blur.</div></div>
+        <div class="tip"><div class="tip-n">6</div><div class="tip-t"><strong>Plain background</strong> improves reconstruction quality.</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="section-label" style="justify-content:space-between">
+      <span>Jobs &amp; Models</span>
+      <button id="clear-failed-btn" onclick="clearFailed()" style="
+        background:none; border:1px solid var(--border); border-radius:3px;
+        padding:3px 10px; color:var(--muted); font-family:var(--mono);
+        font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+        cursor:pointer; transition:all 0.15s; display:none;
+      ">Clear Failed</button>
+      <button id="clear-all-btn" onclick="clearAll()" style="
+        background:none; border:1px solid var(--border); border-radius:3px;
+        padding:3px 10px; color:var(--muted); font-family:var(--mono);
+        font-size:9px; letter-spacing:0.1em; text-transform:uppercase;
+        cursor:pointer; transition:all 0.15s; display:none;
+        margin-left:6px;
+      ">Clear All</button>
+    </div>
+    <div class="empty-state" id="empty-state">
+      <span class="empty-icon">&#128302;</span>
+      <span>No jobs yet.<br>Upload a video to begin.</span>
+    </div>
+    <div id="job-list"></div>
+  </div>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let selectedFile = null;
+let jobs = [];
+const sseMap = {};   // job_id → EventSource
+
+// ── DOM refs ──────────────────────────────────────────────────────────────
+const dropzone   = document.getElementById('dropzone');
+const fileInput  = document.getElementById('file-input');
+const selectedEl = document.getElementById('selected-file');
+const fnameEl    = document.getElementById('fname');
+const fmetaEl    = document.getElementById('fmeta');
+const removeBtn  = document.getElementById('remove-btn');
+const submitBtn  = document.getElementById('submit-btn');
+const sceneInput = document.getElementById('scene-name');
+
+// ── File selection ────────────────────────────────────────────────────────
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag-over'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag-over'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', () => { if (fileInput.files[0]) setFile(fileInput.files[0]); });
+removeBtn.addEventListener('click', clearFile);
+sceneInput.addEventListener('input', updateSubmit);
+
+function setFile(f) {
+  selectedFile = f;
+  fnameEl.textContent = f.name;
+  fmetaEl.textContent = (f.size / 1e6).toFixed(1) + ' MB';
+  dropzone.style.display = 'none';
+  selectedEl.classList.add('show');
+  updateSubmit();
+}
+function clearFile() {
+  selectedFile = null; fileInput.value = '';
+  dropzone.style.display = ''; selectedEl.classList.remove('show');
+  updateSubmit();
+}
+function updateSubmit() {
+  submitBtn.disabled = !(selectedFile && sceneInput.value.trim().length > 0);
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────
+submitBtn.addEventListener('click', async () => {
+  if (!selectedFile || !sceneInput.value.trim()) return;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Uploading...';
+  const fd = new FormData();
+  fd.append('item_name', sceneInput.value.trim());
+  fd.append('files', selectedFile);
+  try {
+    const res  = await fetch('/upload', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Upload failed');
+    toast('Upload complete', `"${data.item_name}" queued (${data.queue_mode} mode).`);
+    clearFile(); sceneInput.value = ''; updateSubmit();
+    // Start SSE for the new job immediately
+    fetchJobs().then(() => subscribeSSE(data.job_id));
+  } catch(err) {
+    toast('Upload failed', err.message, true);
+  } finally {
+    submitBtn.textContent = 'Upload & Start Pipeline'; updateSubmit();
+  }
+});
+
+// ── SSE subscription (GOD MODE live stage tracker) ────────────────────────
+function subscribeSSE(jobId) {
+  if (sseMap[jobId]) return;   // already subscribed
+  const es = new EventSource(`/api/jobs/${jobId}/stream`);
+  sseMap[jobId] = es;
+
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    if (data.error) return;
+
+    // Patch the local jobs array with fresh data
+    const idx = jobs.findIndex(j => j.job_id === jobId);
+    if (idx >= 0) {
+      jobs[idx] = { ...jobs[idx], ...data };
+    } else {
+      jobs.unshift(data);
+    }
+
+    // Re-render just this card
+    const card = document.querySelector(`[data-jid="${jobId}"]`);
+    if (card) updateCard(card, jobs.find(j => j.job_id === jobId));
+    updateHeader();
+
+    if (data.done) {
+      es.close();
+      delete sseMap[jobId];
+      if (data.status === 'ready') {
+        toast('Model ready! 🎉', `"${data.item_name || jobId}" is live.`);
+      }
+    }
+  };
+
+  es.onerror = () => {
+    es.close();
+    delete sseMap[jobId];
+  };
+}
+
+// ── Stage tracker helpers ─────────────────────────────────────────────────
+const STAGE_ORDER = ['extracting', 'colmap', 'training', 'exporting', 'ready'];
+const STAGE_ICONS = {
+  extracting: '🎞',
+  colmap:     '📐',
+  training:   '⚙️',
+  exporting:  '📦',
+  ready:      '✅',
+  failed:     '❌',
+};
+const STAGE_LABELS = {
+  extracting: 'Frames',
+  colmap:     'COLMAP',
+  training:   'Train',
+  exporting:  'Export',
+  ready:      'Done',
+  failed:     'Failed',
+};
+
+function buildStageTrack(status, isFailed) {
+  if (isFailed) {
+    return `<div class="stage-track"><span class="stage-step failed">${STAGE_ICONS.failed} Failed</span></div>`;
+  }
+  const currentIdx = STAGE_ORDER.indexOf(status);
+  let html = '<div class="stage-track">';
+  STAGE_ORDER.forEach((s, i) => {
+    const cls = i < currentIdx ? 'done' : i === currentIdx ? 'active' : '';
+    const icon = i < currentIdx ? '✓' : STAGE_ICONS[s] || '○';
+    html += `<span class="stage-step ${cls}"><span class="stage-icon">${icon}</span>${STAGE_LABELS[s]}</span>`;
+    if (i < STAGE_ORDER.length - 1) html += '<span class="stage-sep"></span>';
+  });
+  html += '</div>';
+  return html;
+}
+
+function buildMetricsRow(job) {
+  const m = job.metrics || {};
+  const chips = [];
+  if (job.num_images)   chips.push(`<span class="metric-chip"><span class="mk">Frames</span><span class="mv">${job.num_images}</span></span>`);
+  if (job.num_gaussians) chips.push(`<span class="metric-chip"><span class="mk">Splats</span><span class="mv">${(job.num_gaussians/1e6).toFixed(2)}M</span></span>`);
+  if (m.psnr)  chips.push(`<span class="metric-chip"><span class="mk">PSNR</span><span class="mv">${m.psnr} dB</span></span>`);
+  if (m.ssim)  chips.push(`<span class="metric-chip"><span class="mk">SSIM</span><span class="mv">${m.ssim}</span></span>`);
+  return chips.length ? `<div class="metrics-row">${chips.join('')}</div>` : '';
+}
+
+// ── Job list ──────────────────────────────────────────────────────────────
+async function fetchJobs() {
+  try {
+    const res = await fetch('/api/jobs');
+    jobs = await res.json();
+    renderJobs(); updateHeader();
+    // Subscribe SSE for any in-progress jobs
+    jobs.forEach(j => {
+      if (!['ready','failed'].includes(j.status)) subscribeSSE(j.job_id);
+    });
+  } catch {}
+}
+
+function renderJobs() {
+  const list  = document.getElementById('job-list');
+  const empty = document.getElementById('empty-state');
+  if (jobs.length === 0) { empty.style.display = 'flex'; list.innerHTML = ''; return; }
+  empty.style.display = 'none';
+  jobs.forEach(job => {
+    const existing = list.querySelector(`[data-jid="${job.job_id}"]`);
+    if (existing) updateCard(existing, job);
+    else list.prepend(makeCard(job));
+  });
+}
+
+function makeCard(job) {
+  const card = document.createElement('div');
+  card.dataset.jid = job.job_id;
+  updateCard(card, job); return card;
+}
+
+function updateCard(card, job) {
+  const isFailed  = job.status === 'failed';
+  const isReady   = job.status === 'ready';
+  card.className  = 'job-card s-' + job.status;
+
+  const fillClass = isReady ? 'pf-ready' : isFailed ? 'pf-failed' : 'pf-active';
+  const dt        = new Date(job.created_at).toLocaleTimeString();
+
+  const stageTrack  = buildStageTrack(job.status, isFailed);
+  const metricsRow  = buildMetricsRow(job);
+
+  const viewBtn = isReady
+    ? `<a class="btn-view" href="/viewer/${job.job_id}" target="_blank">Open in Browser Viewer →</a>` : '';
+  const dlBtns = isReady
+    ? `<a class="btn-download" href="/ply/${job.job_id}" download>Download .ply</a>
+       <a class="btn-download" href="/splat/${job.job_id}" download style="margin-left:6px">Download .splat</a>`
+    : '';
+  const errMsg = job.error
+    ? `<div style="color:var(--danger);font-size:11px;margin-top:8px">${job.error}</div>` : '';
+
+  // Delete button — shown for all non-active jobs
+  const _ACTIVE_STATUSES = ['extracting', 'colmap', 'training'];
+  const canDelete = !_ACTIVE_STATUSES.includes(job.status);
+  const deleteBtn = canDelete
+    ? `<button class="btn-delete" onclick="deleteJob('${job.job_id}')" title="Remove from list">✕ Remove</button>`
+    : '';
+
+  // Colab next-steps panel — shown when job is stuck at training stage
+  const isTraining = job.status === 'training' || job.status === 'colmap';
+  const colabPanel = isTraining ? `
+    <div class="colab-panel show" id="colab-${job.job_id}">
+      <div class="colab-header">
+        <span class="colab-header-icon">🚀</span>
+        <span class="colab-header-title">GPU Training Required — Continue on Colab</span>
+        <span class="colab-header-sub">Free T4 GPU</span>
+      </div>
+      <div class="colab-body">
+        <div class="colab-step">
+          <div class="colab-step-n">1</div>
+          <div class="colab-step-body">
+            <strong>Wait for COLMAP to finish</strong> on this machine (progress bar above must show "COLMAP done").
+            Training will stall — that is expected.
+          </div>
+        </div>
+        <div class="colab-step">
+          <div class="colab-step-n">2</div>
+          <div class="colab-step-body">
+            <strong>Zip your frames and COLMAP output.</strong> Run this in PowerShell:
+            <code class="colab-code">Compress-Archive -Path work\\${job.job_id}\\frames, work\\${job.job_id}\\colmap, config -DestinationPath monosplat_job.zip</code>
+            <button class="colab-copy-btn" onclick="copyCmd('work\\\\${job.job_id}\\\\frames, work\\\\${job.job_id}\\\\colmap')">Copy paths</button>
+          </div>
+        </div>
+        <div class="colab-step">
+          <div class="colab-step-n">3</div>
+          <div class="colab-step-body">
+            <strong>Open the Colab notebook</strong> (monosplat_colab_gpu.ipynb) and upload
+            <code>monosplat_job.zip</code> when prompted in Cell 3.
+            Training takes 20–40 min on a free T4 GPU.
+          </div>
+        </div>
+        <div class="colab-step">
+          <div class="colab-step-n">4</div>
+          <div class="colab-step-body">
+            <strong>Download the .splat file</strong> from Colab Cell 7. Place it at:
+            <code class="colab-code">work\\${job.job_id}\\models\\gaussian\\${job.job_id}.splat</code>
+          </div>
+        </div>
+        <div class="colab-step">
+          <div class="colab-step-n">5</div>
+          <div class="colab-step-body">
+            <strong>Update models/registry.json</strong> — find job <code>${job.job_id}</code> and set:
+            <code class="colab-code">"status": "ready",
+"splat_path": "work/${job.job_id}/models/gaussian/${job.job_id}.splat",
+"ply_path":   "work/${job.job_id}/models/gaussian/${job.job_id}.ply"</code>
+            <button class="colab-copy-btn" onclick="copyCmd('&quot;status&quot;: &quot;ready&quot;,\\n&quot;splat_path&quot;: &quot;work/${job.job_id}/models/gaussian/${job.job_id}.splat&quot;,\\n&quot;ply_path&quot;: &quot;work/${job.job_id}/models/gaussian/${job.job_id}.ply&quot;')">Copy JSON</button>
+          </div>
+        </div>
+        <div class="colab-step">
+          <div class="colab-step-n">6</div>
+          <div class="colab-step-body">
+            <strong>Reload this page</strong> — your job will show as Ready and the viewer link will appear.
+          </div>
+        </div>
+        <a class="btn-colab" href="https://colab.research.google.com" target="_blank">Open Google Colab →</a>
+      </div>
+    </div>` : '';
+
+  card.innerHTML =
+    `<div class="job-top">
+       <div class="job-name">${job.item_name}</div>
+       <div style="display:flex;align-items:center;gap:8px">
+         <span class="badge b-${job.status}">${job.status}</span>
+         ${deleteBtn}
+       </div>
+     </div>
+     <div class="job-meta">${dt}</div>
+     ${stageTrack}
+     <div class="progress-track">
+       <div class="progress-fill ${fillClass}" style="width:${job.progress || 0}%"></div>
+     </div>
+     <div class="job-msg">${job.message || '&mdash;'}</div>
+     ${metricsRow}
+     ${errMsg}${colabPanel}${viewBtn}${dlBtns}`;
+}
+
+function updateHeader() {
+  const ready   = jobs.filter(j => j.status === 'ready').length;
+  const inQueue = jobs.filter(j => !['ready','failed'].includes(j.status)).length;
+  const failed  = jobs.filter(j => j.status === 'failed').length;
+  const inactive = jobs.filter(j => !['extracting','colmap','training'].includes(j.status)).length;
+  document.getElementById('hdr-ready').textContent = ready + ' Model' + (ready !== 1 ? 's' : '') + ' Ready';
+  document.getElementById('hdr-queue').textContent = inQueue + ' In Queue';
+  const failedBtn = document.getElementById('clear-failed-btn');
+  const allBtn    = document.getElementById('clear-all-btn');
+  if (failedBtn) failedBtn.style.display = failed > 0 ? 'inline-block' : 'none';
+  if (allBtn)    allBtn.style.display    = inactive > 0 ? 'inline-block' : 'none';
+}
+
+// ── Delete a single job ───────────────────────────────────────────────────
+async function deleteJob(jobId) {
+  try {
+    const res = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Delete failed');
+    // Remove from local state and DOM
+    jobs = jobs.filter(j => j.job_id !== jobId);
+    const card = document.querySelector(`[data-jid="${jobId}"]`);
+    if (card) {
+      card.style.transition = 'opacity 0.25s, transform 0.25s';
+      card.style.opacity = '0'; card.style.transform = 'translateX(16px)';
+      setTimeout(() => card.remove(), 250);
+    }
+    updateHeader();
+    if (jobs.length === 0) document.getElementById('empty-state').style.display = 'flex';
+  } catch(err) {
+    toast('Delete failed', err.message, true);
+  }
+}
+
+// ── Clear failed jobs only ────────────────────────────────────────────────
+async function clearFailed() {
+  try {
+    const res  = await fetch('/api/jobs?mode=failed', { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Clear failed');
+    jobs.filter(j => j.status === 'failed').forEach(j => {
+      const card = document.querySelector(`[data-jid="${j.job_id}"]`);
+      if (card) card.remove();
+    });
+    jobs = jobs.filter(j => j.status !== 'failed');
+    updateHeader();
+    if (jobs.length === 0) document.getElementById('empty-state').style.display = 'flex';
+    toast('Cleared', `${data.cleared} failed job${data.cleared !== 1 ? 's' : ''} removed.`);
+  } catch(err) {
+    toast('Clear failed', err.message, true);
+  }
+}
+
+// ── Clear ALL non-active jobs ─────────────────────────────────────────────
+async function clearAll() {
+  const _ACTIVE = ['extracting', 'colmap', 'training'];
+  try {
+    const res  = await fetch('/api/jobs?mode=all', { method: 'DELETE' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || 'Clear failed');
+    jobs.filter(j => !_ACTIVE.includes(j.status)).forEach(j => {
+      if (sseMap[j.job_id]) { sseMap[j.job_id].close(); delete sseMap[j.job_id]; }
+      const card = document.querySelector(`[data-jid="${j.job_id}"]`);
+      if (card) card.remove();
+    });
+    jobs = jobs.filter(j => _ACTIVE.includes(j.status));
+    updateHeader();
+    if (jobs.length === 0) document.getElementById('empty-state').style.display = 'flex';
+    toast('Cleared', `${data.cleared} job${data.cleared !== 1 ? 's' : ''} removed.`);
+  } catch(err) {
+    toast('Clear all failed', err.message, true);
+  }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────
+function toast(title, msg, isErr) {
+  const c = document.getElementById('toasts');
+  const el = document.createElement('div');
+  el.className = 'toast' + (isErr ? ' err' : '');
+  el.innerHTML = `<div class="toast-title">${title}</div><div class="toast-msg">${msg || ''}</div>`;
+  c.appendChild(el);
+  setTimeout(() => { el.style.transition='opacity 0.4s'; el.style.opacity='0'; setTimeout(()=>el.remove(),400); }, 5000);
+}
+
+// ── Copy to clipboard helper ──────────────────────────────────────────────
+function copyCmd(text) {
+  // Decode HTML entities before copying
+  const el = document.createElement('textarea');
+  el.innerHTML = text;
+  const decoded = el.value;
+  navigator.clipboard.writeText(decoded).then(() => {
+    toast('Copied!', 'Text copied to clipboard.');
+  }).catch(() => {
+    toast('Copy failed', 'Please copy the text manually.', true);
+  });
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+fetchJobs();
+setInterval(fetchJobs, 10000);   // fallback poll every 10s (SSE handles real-time)
+</script>
+</body>
+</html>
