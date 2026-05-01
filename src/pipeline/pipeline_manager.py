@@ -255,9 +255,10 @@ class UploadWatcher:
                 self._stable[key] = now
             elif now - self._stable.get(key, now) >= self.STABILITY_WAIT:
                 print(f"[watcher] Stable upload detected: {key}")
-                job_id = self.on_new_upload(str(item_dir), key)
-                if job_id:
-                    self._processed.add(key)
+                # Mark as processed BEFORE calling on_new_upload so that
+                # duplicate-skip returns do not cause infinite re-triggering.
+                self._processed.add(key)
+                self.on_new_upload(str(item_dir), key)
 
 
 # ---------------------------------------------------------------------------
@@ -284,13 +285,16 @@ class PipelineWorker:
         print(f"[worker] Queued: {job.item_name} ({job.job_id})")
 
     def start(self):
+        # Recover WAITING jobs orphaned by a previous restart — do this
+        # inside the lock BEFORE starting the thread to avoid a race where
+        # the worker thread picks up jobs while we are still appending.
+        with self._lock:
+            for job in self.registry.all_jobs():
+                if job.status == JobStatus.WAITING:
+                    self._queue.append(job)
+                    print(f"[worker] Recovered orphaned job: {job.item_name} ({job.job_id})")
         t = threading.Thread(target=self._loop, daemon=True, name="PipelineWorker")
         t.start()
-        # Recover WAITING jobs orphaned by a previous restart
-        for job in self.registry.all_jobs():
-            if job.status == JobStatus.WAITING:
-                self._queue.append(job)
-                print(f"[worker] Recovered orphaned job: {job.item_name} ({job.job_id})")
 
     def stop(self):
         self._stop_event.set()

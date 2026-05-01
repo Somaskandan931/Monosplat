@@ -1,4 +1,4 @@
-# Python
+# ── Python ─────────────────────────────────────────────────────────
 __pycache__/
 *.py[cod]
 *.pyo
@@ -9,12 +9,12 @@ dist/
 build/
 *.egg
 
-# Virtual environment
+# ── Virtual Environment ────────────────────────────────────────────
 venv/
 .env/
 env/
 
-# Data (large files — store separately)
+# ── Data (large files — store separately) ──────────────────────────
 data/raw/*
 data/processed/*
 data/colmap_output/*
@@ -22,13 +22,13 @@ data/colmap_output/*
 !data/processed/.gitkeep
 !data/colmap_output/.gitkeep
 
-# Models (large files — use Git LFS or Drive)
+# ── Models (large files — use Git LFS or Drive) ────────────────────
 models/gaussian/*
 models/checkpoints/*
 !models/gaussian/.gitkeep
 !models/checkpoints/.gitkeep
 
-# Outputs
+# ── Outputs ────────────────────────────────────────────────────────
 outputs/renders/*
 outputs/logs/*
 outputs/videos/*
@@ -36,24 +36,28 @@ outputs/videos/*
 !outputs/logs/.gitkeep
 !outputs/videos/.gitkeep
 
-# Work directory (job processing files)
+# ── Work directory (job processing files) ──────────────────────────
 work/
 uploads/
 
-# Jupyter
+# ── Archives (IMPORTANT: prevent Colab zip uploads) ────────────────
+*.zip
+*.tar
+*.gz
+*.7z
+
+# ── Jupyter ────────────────────────────────────────────────────────
 .ipynb_checkpoints/
 
-# IDE
+# ── IDE ────────────────────────────────────────────────────────────
 .vscode/
 .idea/
 *.swp
 *.swo
 
-# OS
+# ── OS ─────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
 
-# Logs
+# ── Logs ───────────────────────────────────────────────────────────
 *.log
-.zip
-.log

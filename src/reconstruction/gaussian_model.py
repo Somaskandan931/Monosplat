@@ -281,13 +281,17 @@ class GaussianModel(nn.Module):
     def load_state(self, state: Dict[str, np.ndarray]) -> None:
         self.create_from_points(state["positions"], state["colors"])
         with torch.no_grad():
-            self._opacities.detach().copy_(
+            # Use .data.copy_() — the correct pattern for in-place parameter
+            # updates. .detach().copy_() works but is semantically misleading
+            # and can cause subtle autograd issues if the parameter is live
+            # in an optimizer's state dict.
+            self._opacities.data.copy_(
                 inverse_sigmoid(torch.from_numpy(state["opacities"]).clamp(1e-6, 1 - 1e-6))
             )
-            self._scales.detach().copy_(
+            self._scales.data.copy_(
                 torch.log(torch.from_numpy(state["scales"]).clamp(min=1e-7))
             )
-            self._rotations.detach().copy_(torch.from_numpy(state["rotations"]))
+            self._rotations.data.copy_(torch.from_numpy(state["rotations"]))
 
     def __len__(self) -> int:
         if self._positions is None:

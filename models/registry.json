@@ -1,1 +1,19 @@
-{}
+{
+  "cd24904e9fa0": {
+    "job_id": "cd24904e9fa0",
+    "item_name": "vase",
+    "upload_dir": "uploads\\vase",
+    "work_dir": "work\\cd24904e9fa0",
+    "status": "ready_for_colab",
+    "progress": 60,
+    "message": "COLMAP complete. Upload work/cd24904e9fa0/ to Colab for GPU training.",
+    "ply_path": null,
+    "splat_path": null,
+    "thumbnail": null,
+    "num_images": 54,
+    "num_gaussians": 0,
+    "error": null,
+    "created_at": "2026-05-01T21:58:09.289410",
+    "updated_at": "2026-05-01T22:24:36.942730"
+  }
+}

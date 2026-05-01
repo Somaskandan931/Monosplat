@@ -63,6 +63,22 @@ class GaussianTrainer:
             cfg.training.iterations = cfg.training.iterations_cpu
             print(f"[Trainer] CPU mode: iterations → {cfg.training.iterations}")
 
+        # Guard: if running on CPU without CUDA rasterizer, the software renderer
+        # loop is O(N_gaussians) per pixel per iteration — impractical for large
+        # iteration counts. Warn loudly so the user knows to switch to Colab/GPU.
+        if self.device == "cpu":
+            max_cpu_iters = getattr(cfg.training, 'iterations_cpu', 1000)
+            if cfg.training.iterations > max_cpu_iters:
+                import warnings
+                warnings.warn(
+                    f"[Trainer] CPU mode with {cfg.training.iterations:,} iterations and "
+                    f"software renderer — this will take an impractical amount of time. "
+                    f"Capping at {max_cpu_iters:,} (set training.iterations_cpu in config to change). "
+                    "Use Colab/GPU for full training.",
+                    RuntimeWarning, stacklevel=2,
+                )
+                cfg.training.iterations = max_cpu_iters
+
         print(f"[Trainer] Device  : {self.device}")
         print(f"[Trainer] Output  : {self.output_dir.resolve()}")
 
@@ -228,7 +244,12 @@ class GaussianTrainer:
         grad_threshold: float = 0.0002,
         percent_dense: float  = 0.01,
     ) -> None:
-        avg_grads    = self._grad_accum / (self._grad_denom + 1e-8)
+        # Snapshot averaged gradients BEFORE any model size changes.
+        # densify_and_clone and densify_and_split must both receive the
+        # same avg_grads tensor (sized to the current model) — if clone
+        # runs first it appends new Gaussians, making split receive a
+        # stale tensor of the wrong length.
+        avg_grads    = (self._grad_accum / (self._grad_denom + 1e-8)).clone()
         scene_extent = self.model.positions.detach().norm(dim=1).max().item()
 
         self.optimizer.zero_grad(set_to_none=True)
@@ -237,8 +258,18 @@ class GaussianTrainer:
             avg_grads, grad_threshold=grad_threshold,
             scene_extent=scene_extent, percent_dense=percent_dense,
         )
+        # Re-snapshot avg_grads for split: clone may have changed model size.
+        # Newly cloned Gaussians have zero accumulated gradient so we pad.
+        n_current = len(self.model)
+        n_old     = avg_grads.shape[0]
+        if n_current > n_old:
+            padding   = torch.zeros(n_current - n_old, device=self.device)
+            avg_grads_split = torch.cat([avg_grads, padding], dim=0)
+        else:
+            avg_grads_split = avg_grads
+
         self.model.densify_and_split(
-            avg_grads, grad_threshold=grad_threshold,
+            avg_grads_split, grad_threshold=grad_threshold,
             scene_extent=scene_extent, percent_dense=percent_dense,
             N=2,   # 360GS uses N=2
         )
@@ -274,10 +305,19 @@ class GaussianTrainer:
     # ------------------------------------------------------------------
 
     def _reset_opacity(self) -> None:
+        """
+        Reset opacities to a small value following the 360GS schedule.
+        sigmoid(-4.595) ≈ 0.01 — the reset ceiling, NOT a floor.
+        We cap each logit at -4.595 so well-trained high-opacity Gaussians
+        are brought back to ~0.01 without pushing low-opacity ones even lower.
+        """
         self.optimizer.zero_grad(set_to_none=True)
         old_opacity_param = self.model._opacities
+        reset_logit = torch.tensor(-4.595, device=self.device, dtype=old_opacity_param.dtype)
         with torch.no_grad():
-            new_opacities = old_opacity_param.detach().clamp(max=-4.595)
+            # torch.min: caps each logit at reset_logit (≈ opacity 0.01)
+            # clamp(max=) would force ALL opacities to ≤ 0.01, destroying training.
+            new_opacities = torch.min(old_opacity_param.detach(), reset_logit.expand_as(old_opacity_param))
         self.model._opacities = torch.nn.Parameter(new_opacities)
         for group in self.optimizer.param_groups:
             if group.get("name") == "opacity":

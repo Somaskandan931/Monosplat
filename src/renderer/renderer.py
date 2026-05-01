@@ -150,6 +150,17 @@ class GaussianRenderer:
     def render_torch(self, model, camera: Camera) -> torch.Tensor:
         if self._use_cuda:
             return self._render_cuda(model, camera)
+        # Warn when the software renderer would be impractically slow.
+        # The pixel-level Python loop scales as O(N_gaussians * H * W) per call.
+        n = len(model) if hasattr(model, '__len__') else 0
+        if n > 5000:
+            import warnings
+            warnings.warn(
+                f"[Renderer] Software renderer called with {n:,} Gaussians — "
+                "this will be extremely slow on CPU. "
+                "Install diff-gaussian-rasterization or use a GPU.",
+                RuntimeWarning, stacklevel=2,
+            )
         return self._render_software(model, camera)
 
     def render(self, model, camera: Camera) -> np.ndarray:

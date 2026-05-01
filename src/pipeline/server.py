@@ -1,8 +1,8 @@
-"""
-server.py  —  GOD MODE
+﻿"""
+server.py  —  Product
 FastAPI web server for MonoSplat.
 
-GOD MODE upgrades
+Product features
 -----------------
     ✓ Job queue (Redis/RQ with thread fallback)
     ✓ SSE carries stage + progress % — drives live UI progress bar
@@ -79,7 +79,7 @@ async def lifespan(app: FastAPI):
     manager.start()
     mode = init_queue(prefer_redis=True)
     print(f"[server] Queue mode: {mode}")
-    print("[server] MonoSplat GOD MODE started ✓")
+    print("[server] MonoSplat server started ✓")
     yield
     if manager:
         manager.stop()
@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="MonoSplat — GOD MODE Pipeline",
+    title="MonoSplat — Product Pipeline",
     version="2.0.0",
     description="Single-camera 3D Gaussian Splat reconstruction with async job queue.",
     lifespan=lifespan,
@@ -340,12 +340,12 @@ async def health():
             "in_queue": in_queue,
             "failed":   failed,
         },
-        "version": "2.0.0 (GOD MODE)",
+        "version": "2.0.0",
     })
 
 
 # ---------------------------------------------------------------------------
-# SSE live stream  — GOD MODE: carries stage name + progress %
+# SSE live stream  — Product: carries stage name + progress %
 # ---------------------------------------------------------------------------
 
 @app.get("/api/jobs/{job_id}/stream")

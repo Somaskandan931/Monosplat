@@ -1,6 +1,6 @@
-"""
+﻿"""
 queue_setup.py
-Redis + RQ job queue setup for MonoSplat GOD MODE.
+Redis + RQ job queue setup for MonoSplat.
 
 Provides a single shared Queue instance used by:
     - server.py    → to enqueue jobs
@@ -29,7 +29,7 @@ try:
     from redis import Redis
     from rq import Queue as RQQueue
     _REDIS_AVAILABLE = True
-except ImportError:
+except Exception:
     _REDIS_AVAILABLE = False
 
 _rq_queue:     Optional["RQQueue"]   = None

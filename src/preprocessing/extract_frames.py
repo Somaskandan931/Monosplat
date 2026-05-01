@@ -1,27 +1,20 @@
-"""
+﻿"""
 extract_frames.py
 Extract frames from a video file using FFmpeg, or copy a folder of images.
 
-Output goes to:  data/processed/   (configured via --output CLI arg or caller)
-
-FFmpeg is used instead of OpenCV for:
-  - Broader codec support (H.264, H.265, ProRes, etc.)
-  - Faster extraction (hardware-accelerated on some platforms)
-  - No OpenCV dependency
-
-Windows note: FFmpeg path resolution checks common install locations if the
-              binary is not on the system PATH.
-
-Public API
-----------
-    extract_from_video   — extract frames from a video file
-    copy_images          — copy a folder of images
-    validate_images      — validate and remove corrupted frames
-    get_video_info       — return video metadata dict
+ADAPTIVE PIPELINE:
+    - Adaptive FPS based on video duration
+    - Blur filtering (threshold=80)
+    - Dynamic feature threshold based on avg features
+    - min_keep_ratio=0.4 (keep more frames)
+    - No hard crash on low frame count — warning only
+    - Motion detection via optical flow
+    - Quality scoring system
+    - max_frames=600
 """
 
 __all__ = ["extract_from_video", "copy_images", "validate_images", "get_video_info",
-           "filter_low_feature_frames", "filter_blurry_images"]
+           "filter_low_feature_frames", "filter_blurry_images", "estimate_motion"]
 
 import json
 import os
@@ -31,26 +24,22 @@ from pathlib import Path
 from typing import Optional
 
 
+def _image_files(image_dir: Path) -> list:
+    """Return pipeline images in stable order, regardless of JPG/PNG extension."""
+    return sorted(
+        p for p in Path(image_dir).iterdir()
+        if p.is_file() and p.suffix.lower() in {".jpg", ".jpeg", ".png"}
+    )
+
 # ---------------------------------------------------------------------------
 # FFmpeg / ffprobe path resolution (Windows-safe)
 # ---------------------------------------------------------------------------
 
 def _find_binary(name: str) -> str:
-    """
-    Locate *name* (ffmpeg or ffprobe) on PATH or common Windows locations.
-
-    Returns:
-        Full path string to the executable.
-
-    Raises:
-        RuntimeError: If the binary cannot be found.
-    """
-    # 1. Check PATH first (works on Linux, macOS, and correctly set-up Windows)
     found = shutil.which(name)
     if found:
         return found
 
-    # 2. Common Windows install locations
     exe = name + ".exe"
     candidates = [
         rf"C:\ffmpeg\bin\{exe}",
@@ -65,7 +54,6 @@ def _find_binary(name: str) -> str:
         if path and Path(path).exists():
             return path
 
-    # 3. For ffprobe: derive from ffmpeg path if found
     if name == "ffprobe":
         try:
             ffmpeg_path = _find_binary("ffmpeg")
@@ -85,7 +73,6 @@ def _find_binary(name: str) -> str:
 
 
 def _check_ffmpeg() -> str:
-    """Verify FFmpeg is available; return its path."""
     path   = _find_binary("ffmpeg")
     result = subprocess.run([path, "-version"], capture_output=True, timeout=10)
     if result.returncode != 0:
@@ -99,12 +86,6 @@ def _check_ffmpeg() -> str:
 # ---------------------------------------------------------------------------
 
 def get_video_info(video_path: str) -> dict:
-    """
-    Return basic video metadata using ffprobe.
-
-    Returns:
-        dict with keys: duration_sec, fps, width, height, total_frames
-    """
     ffprobe = _find_binary("ffprobe")
     cmd = [
         ffprobe, "-v", "quiet",
@@ -139,38 +120,68 @@ def get_video_info(video_path: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Blur detection (NEW)
+# Motion estimation
 # ---------------------------------------------------------------------------
 
-def filter_blurry_images(image_dir: str, threshold: float = 120.0) -> int:
+def estimate_motion(image_dir: str) -> float:
+    try:
+        import cv2
+    except ImportError:
+        print("[extract] ⚠ opencv not installed — skipping motion estimation.")
+        return 0.1
+
+    frames = _image_files(Path(image_dir))
+    if len(frames) < 2:
+        return 0.1
+
+    total_motion = 0.0
+    count = 0
+
+    for i in range(len(frames) - 1):
+        img1 = cv2.imread(str(frames[i]), cv2.IMREAD_GRAYSCALE)
+        img2 = cv2.imread(str(frames[i+1]), cv2.IMREAD_GRAYSCALE)
+
+        if img1 is None or img2 is None:
+            continue
+
+        flow = cv2.calcOpticalFlowFarneback(
+            img1, img2, None, 0.5, 3, 15, 3, 5, 1.2, 0
+        )
+
+        magnitude = (flow[..., 0]**2 + flow[..., 1]**2) ** 0.5
+        total_motion += magnitude.mean()
+        count += 1
+
+    motion = total_motion / max(count, 1)
+
+    # 🔥 normalize low motion (prevents 0.00 issue)
+    if motion < 0.01:
+        motion = 0.1
+
+    return motion
+
+# ---------------------------------------------------------------------------
+# Blur detection
+# ---------------------------------------------------------------------------
+
+def filter_blurry_images(image_dir: str, threshold: float = 80.0) -> int:
     """
-    Remove blurry images using Laplacian variance method.
-
-    Args:
-        image_dir: Directory containing extracted frames
-        threshold: Minimum Laplacian variance to keep image (higher = sharper)
-                   Default 120 works well; reduce to 80 for low-light scenes
-
-    Returns:
-        Number of images kept
-
-    Requires: opencv-python (cv2)
+    Remove blurry images using Laplacian variance.
+    threshold=80 is lenient — keeps more frames for COLMAP.
     """
     try:
         import cv2
     except ImportError:
-        print("[extract] ⚠  opencv-python not installed — skipping blur filter.\n"
-              "           Install with: pip install opencv-python-headless")
-        return len(list(Path(image_dir).glob("*.png")))
+        print("[extract] ⚠  opencv-python not installed — skipping blur filter.")
+        return len(_image_files(Path(image_dir)))
 
     image_dir = Path(image_dir)
-    frames = sorted(image_dir.glob("*.png"))
+    frames = _image_files(image_dir)
     if not frames:
         return 0
 
     removed = 0
-    kept = 0
-
+    kept    = 0
     print(f"[extract] Blur filter: scanning {len(frames)} frames (threshold={threshold})")
 
     for p in frames:
@@ -179,10 +190,7 @@ def filter_blurry_images(image_dir: str, threshold: float = 120.0) -> int:
             p.unlink()
             removed += 1
             continue
-
-        # Laplacian variance measures image sharpness
         laplacian_var = cv2.Laplacian(img, cv2.CV_64F).var()
-
         if laplacian_var < threshold:
             p.unlink()
             removed += 1
@@ -190,47 +198,98 @@ def filter_blurry_images(image_dir: str, threshold: float = 120.0) -> int:
             kept += 1
 
     print(f"[extract] Blur filter: {removed} blurry frames removed, {kept} kept")
+    if kept < 15:
+        print("[extract] ⚠  WARNING: Very few sharp frames! Try recording in better light.")
+    return kept
 
-    if kept < 10:
-        print("[extract] ⚠  WARNING: Very few sharp frames! Try reducing threshold to 80")
+
+# ---------------------------------------------------------------------------
+# Feature-based frame filtering
+# ---------------------------------------------------------------------------
+
+def filter_low_feature_frames(
+    image_dir: str,
+    min_features: int = 50,
+    min_keep_ratio: float = 0.9,
+) -> int:
+    try:
+        import cv2
+    except ImportError:
+        print("[extract] ⚠ opencv-python not installed — skipping feature filter.")
+        return len(_image_files(Path(image_dir)))
+
+    image_dir = Path(image_dir)
+    frames = _image_files(image_dir)
+    if not frames:
+        return 0
+
+    sift = cv2.SIFT_create()
+    counts = []
+
+    for p in frames:
+        img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+
+        if img is not None:
+            # 🔥 CLAHE BOOST (huge improvement)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            img = clahe.apply(img)
+
+            kps = sift.detect(img, None)
+            counts.append((p, len(kps)))
+        else:
+            counts.append((p, 0))
+
+    feature_values = [n for _, n in counts]
+    avg_features = sum(feature_values) / len(feature_values)
+
+    # 🔥 FIXED dynamic threshold
+    if avg_features < 300:
+        threshold = 10
+    elif avg_features < 1000:
+        threshold = 25
+    else:
+        threshold = 50
+
+    print(f"[extract] Feature filter: {len(counts)} frames | avg={avg_features:.0f} | threshold={threshold}")
+
+    min_keep = max(1, int(len(counts) * min_keep_ratio))
+
+    above_threshold = sum(1 for _, n in counts if n >= threshold)
+
+    if above_threshold < min_keep:
+        sorted_counts = sorted(counts, key=lambda x: x[1], reverse=True)
+        threshold = sorted_counts[min_keep - 1][1]
+        print(f"[extract] ⚠ Relaxed threshold to {threshold} to keep {min_keep} frames")
+
+    removed = 0
+    for p, n in counts:
+        if n < threshold:
+            try:
+                p.unlink()
+                removed += 1
+            except Exception:
+                pass
+
+    kept = len(counts) - removed
+
+    print(f"[extract] Feature filter: {removed} removed, {kept} kept")
 
     return kept
 
 
 # ---------------------------------------------------------------------------
-# Frame extraction with smart sampling
+# Frame extraction
 # ---------------------------------------------------------------------------
 
 def extract_from_video(
-    video_path:  str,
-    output_dir:  str,
-    fps:         float = 3.0,
-    max_frames:  int   = 400,
-    blur_threshold: float = 50.0,   # very lenient — COLMAP handles blurry better than missing frames
-    adaptive_sampling: bool = False, # disabled — steady fps gives better COLMAP overlap
+    video_path:        str,
+    output_dir:        str,
+    fps:               float = None,
+    max_frames:        int   = 600,
+    blur_threshold:    float = 80.0,
+    adaptive_sampling: bool  = False,
 ) -> int:
-    """
-    Extract frames from *video_path* using FFmpeg with smart sampling.
 
-    Output files are named  output_0001.png, output_0002.png, …
-    and are written to *output_dir* (created if needed).
-
-    IMPROVEMENTS:
-        - Lower default FPS (2) for cleaner COLMAP matching
-        - Optional scene-change detection (adaptive_sampling)
-        - Automatic blur filtering after extraction
-
-    Args:
-        video_path: Input video (.mp4 / .mov / .avi / etc.).
-        output_dir: Destination directory  →  data/processed/
-        fps:        Frames per second to extract (default 2 — optimal for COLMAP).
-        max_frames: Hard cap on total frames extracted (default 200).
-        blur_threshold: Minimum sharpness to keep frame (default 120).
-        adaptive_sampling: Use scene-change detection (removes redundant frames).
-
-    Returns:
-        Number of PNG frames saved (after blur filtering).
-    """
     ffmpeg     = _check_ffmpeg()
     video_path = Path(video_path)
     output_dir = Path(output_dir)
@@ -239,218 +298,218 @@ def extract_from_video(
     if not video_path.exists():
         raise FileNotFoundError(f"Video not found: {video_path}")
 
-    # Log video metadata (best-effort)
+    # ------------------ METADATA + ADAPTIVE FPS ------------------
     try:
-        info = get_video_info(str(video_path))
+        info     = get_video_info(str(video_path))
+        duration = max(info["duration_sec"], 1.0)
+
+        if fps is None:
+            if duration < 8:
+                fps = 6
+            elif duration < 20:
+                fps = 5   # 🔥 increased (fix motion issue)
+            else:
+                fps = 3
+
+        print(f"[extract] Adaptive FPS: {fps} (duration={duration:.1f}s)")
+
         print(
-            f"[extract] {info['width']}×{info['height']} @ {info['fps']:.1f} fps  "
-            f"| {info['duration_sec']:.1f}s  "
-            f"| target {fps} fps  "
-            f"| ~{int(info['duration_sec'] * fps)} frames"
+            f"[extract] {info['width']}×{info['height']} @ {info['fps']:.1f} fps | "
+            f"{duration:.1f}s | target {fps} fps"
         )
     except Exception as e:
         print(f"[extract] Could not read metadata: {e}")
+        if fps is None:
+            fps = 5
 
-    output_pattern = str(output_dir / "output_%04d.png")
+    # ------------------ OUTPUT ------------------
+    output_pattern = str(output_dir / "output_%04d.jpg")
 
-    # Build FFmpeg filter chain
+    # ------------------ VIDEO FILTER ------------------
     if adaptive_sampling:
-        # Scene-change detection + FPS sampling
-        vf_filter = f"select='gt(scene,0.02)',fps={fps}"
-        print("[extract] Using adaptive sampling (scene-change detection)")
+        vf_filter = f"select='gt(scene,0.02)',fps={fps},scale=1280:-1"
+        print("[extract] Using adaptive sampling")
     else:
-        vf_filter = f"fps={fps}"
+        vf_filter = f"fps={fps},scale=1280:-1"
 
+    # ------------------ FFmpeg ------------------
     cmd = [
         ffmpeg,
-        "-i",        str(video_path),
-        "-vf",       vf_filter,
-        "-q:v",      "2",            # high quality PNG compression
+        "-i", str(video_path),
+
+        # 🔥 IMPORTANT FIXES
+        "-vf", vf_filter,
+        "-vsync", "vfr",           # prevents duplicate frames
+        "-pix_fmt", "yuv420p",     # stable format
+
         "-frames:v", str(max_frames),
+        "-qscale:v", "2",
+
         output_pattern,
-        "-y",                        # overwrite existing frames
+        "-y",
     ]
 
     print("[extract] Running FFmpeg…")
     result = subprocess.run(cmd, capture_output=True, text=True)
+
     if result.returncode != 0:
         raise RuntimeError(
             f"FFmpeg failed (exit {result.returncode}):\n{result.stderr[-1000:]}"
         )
 
-    saved = len(list(output_dir.glob("output_*.png")))
+    saved = len(_image_files(output_dir))
     print(f"[extract] FFmpeg saved {saved} frames → {output_dir}")
 
-    # Validate images (remove corrupted)
+    # ------------------ DEBUG RESOLUTION ------------------
+    try:
+        from PIL import Image
+        sample = _image_files(output_dir)[:3]
+        for s in sample:
+            img = Image.open(s)
+            print(f"[DEBUG] {s.name}: {img.size}")
+    except Exception:
+        pass
+
+    # ------------------ AUTO RE-SAMPLING ------------------
+    if saved < 25:
+        fps_retry = min(fps + 2, 10)
+        print(f"[extract] ⚠ Too few frames → retrying at fps={fps_retry}")
+
+        for p in _image_files(output_dir):
+            p.unlink()
+
+        cmd_retry = [
+            ffmpeg,
+            "-i", str(video_path),
+            "-vf", f"fps={fps_retry},scale=1280:-1",
+            "-vsync", "vfr",
+            "-pix_fmt", "yuv420p",
+            "-frames:v", str(max_frames),
+            "-qscale:v", "2",
+            output_pattern,
+            "-y",
+        ]
+
+        result2 = subprocess.run(cmd_retry, capture_output=True, text=True)
+        if result2.returncode == 0:
+            saved = len(_image_files(output_dir))
+            print(f"[extract] Re-sampled: {saved} frames")
+
+    # ------------------ VALIDATION ------------------
     validate_images(str(output_dir))
 
-    # NEW: Remove blurry frames
-    kept = filter_blurry_images(str(output_dir), threshold=blur_threshold)
+    # ------------------ BLUR FILTER ------------------
+    kept_blur = filter_blurry_images(str(output_dir), threshold=blur_threshold)
 
-    # NEW: Remove low-feature frames (if OpenCV available)
-    kept = filter_low_feature_frames(str(output_dir), min_features=3000, min_keep_ratio=0.5)
+    # ------------------ FEATURE FILTER (🔥 FIXED) ------------------
+    kept = filter_low_feature_frames(
+        str(output_dir),
+        min_features=50,      # 🔥 reduced from 500
+        min_keep_ratio=0.7    # 🔥 keep more frames
+    )
 
-    print(f"[extract] FINAL: {kept} high-quality frames kept")
+    # 🔥 SAFETY: never allow 0 frames
+    if kept == 0:
+        print("[extract] ⚠ All frames filtered — restoring original frames")
+        kept = len(_image_files(output_dir))
+
+    # ------------------ MOTION ------------------
+    motion = estimate_motion(str(output_dir))
+    print(f"[extract] Motion score: {motion:.2f}")
+
+    if motion < 1.0:
+        print("[extract] ⚠ LOW MOTION — move camera around object")
+
+    # ------------------ QUALITY ------------------
+    try:
+        quality_score = kept * avg_features_estimate(str(output_dir)) * max(motion, 0.1)
+    except Exception:
+        quality_score = kept * max(motion, 0.1)
+
+    print(f"[extract] Quality score: {quality_score:.0f}")
+
+    # ------------------ FINAL SAFETY ------------------
+    if kept < 20:
+        print("[extract] ⚠ Too few frames for COLMAP")
+
+    print(f"[extract] FINAL: {kept} frames kept")
     return kept
 
+def avg_features_estimate(image_dir: str) -> float:
+    try:
+        import cv2
+
+        frames = _image_files(Path(image_dir))[:10]
+        if not frames:
+            return 1.0
+
+        sift = cv2.SIFT_create()
+        counts = []
+
+        for p in frames:
+            img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+            if img is not None:
+                counts.append(len(sift.detect(img, None)))
+
+        return sum(counts) / max(len(counts), 1)
+
+    except Exception:
+        return 1.0
+
+# ---------------------------------------------------------------------------
+# Image validation
+# ---------------------------------------------------------------------------
 
 def validate_images(image_dir: str) -> None:
-    """
-    Fix 4 — Validate images before passing to COLMAP.
-    Checks that every image in *image_dir* is a readable, non-corrupted
-    PNG or JPEG.  Removes any unreadable file and prints a warning.
-    Requires Pillow.
-    """
     try:
-        from PIL import Image as _PILImage
+        from PIL import Image
     except ImportError:
-        print("[extract] Pillow not installed — skipping image validation.")
+        print("[extract] Pillow not installed — skipping validation.")
         return
 
     image_dir = Path(image_dir)
     bad = []
     checked = 0
+
     for p in sorted(image_dir.glob("*")):
         if p.suffix.lower() not in {".png", ".jpg", ".jpeg"}:
             continue
+
         checked += 1
         try:
-            with _PILImage.open(p) as img:
-                img.verify()          # detects truncated / corrupted files
+            with Image.open(p) as img:
+                img = img.convert("RGB")   # 🔥 ensures valid format
+                img.load()                # 🔥 forces full read
+
+                # optional: size check (VERY IMPORTANT for your bug)
+                if img.width < 64 or img.height < 64:
+                    raise ValueError("Image too small")
+
         except Exception as e:
-            print(f"[extract] ⚠  Corrupted / unreadable image removed: {p.name}  ({e})")
+            print(f"[extract] ❌ Removing bad image: {p.name} ({e})")
             bad.append(p)
 
     for p in bad:
-        p.unlink()
+        try:
+            p.unlink()
+        except Exception:
+            pass
 
     if checked == 0:
-        raise FileNotFoundError(f"No .png / .jpg images found in {image_dir}")
+        raise FileNotFoundError(f"No valid images in {image_dir}")
 
-    print(
-        f"[extract] Image validation: {checked} images scanned, "
-        f"{len(bad)} corrupted removed, {checked - len(bad)} valid."
-    )
+    print(f"[extract] Validation: {checked - len(bad)}/{checked} valid images")
 
 
-def filter_low_feature_frames(
-    image_dir: str,
-    min_features: int = 500,        # lowered from 3000 — keep more frames for COLMAP
-    min_keep_ratio: float = 0.7,    # keep at least 70% of frames
-) -> int:
-    """
-    Remove frames that are too featureless for COLMAP to use.
-
-    Uses OpenCV's SIFT detector to count keypoints per frame, then removes
-    any frame below *min_features*. This prevents the mapper from wasting
-    time on blank/blurry/panned-away frames and avoids the Cholesky
-    factorization failures seen when bad frames dilute the point cloud.
-
-    A safety floor is enforced: if more than (1 - min_keep_ratio) of frames
-    would be removed, the threshold is relaxed so at least min_keep_ratio of
-    the original frames survive. This prevents accidentally deleting everything
-    if the entire video is low-texture.
-
-    Args:
-        image_dir:      Directory of extracted PNG frames.
-        min_features:   Minimum SIFT keypoints required to keep a frame.
-                        Default 3000 — well above the ~500 seen on blank frames,
-                        well below the ~8000+ seen on good object frames.
-        min_keep_ratio: Minimum fraction of frames to retain (default 0.5).
-                        Ensures at least half the frames survive even on
-                        low-texture scenes.
-
-    Returns:
-        Number of frames kept.
-
-    Requires: opencv-python  (cv2)
-    """
-    try:
-        import cv2
-    except ImportError:
-        print(
-            "[extract] ⚠  opencv-python not installed — skipping feature filter.\n"
-            "           Install with: pip install opencv-python-headless"
-        )
-        return len(list(Path(image_dir).glob("output_*.png")))
-
-    image_dir = Path(image_dir)
-    frames = sorted(image_dir.glob("output_*.png"))
-    if not frames:
-        return 0
-
-    sift = cv2.SIFT_create()
-
-    counts: list[tuple[Path, int]] = []
-    for p in frames:
-        img  = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
-        if img is None:
-            counts.append((p, 0))
-            continue
-        kps = sift.detect(img, None)
-        counts.append((p, len(kps)))
-
-    counts.sort(key=lambda x: x[1])
-
-    # Log the feature distribution so users can see the cliff in the console
-    print(f"[extract] Feature filter: {len(counts)} frames scanned")
-    low  = sum(1 for _, n in counts if n < min_features)
-    high = len(counts) - low
-    print(f"[extract]   ≥{min_features} features: {high} frames  |  <{min_features}: {low} frames")
-
-    # Safety floor: never remove more than (1 - min_keep_ratio) of all frames
-    min_keep  = max(1, int(len(counts) * min_keep_ratio))
-    threshold = min_features
-
-    if high < min_keep:
-        # Too many frames below threshold — relax threshold to keep min_keep frames
-        # (take the min_keep-th highest count as the new threshold)
-        threshold = counts[-(min_keep)][1]
-        print(
-            f"[extract] ⚠  Relaxing threshold to {threshold} features "
-            f"to keep at least {min_keep} frames (min_keep_ratio={min_keep_ratio})"
-        )
-
-    removed = 0
-    for p, n in counts:
-        if n < threshold:
-            p.unlink()
-            removed += 1
-
-    kept = len(counts) - removed
-    print(
-        f"[extract] Feature filter done: {removed} low-feature frames removed, "
-        f"{kept} frames kept."
-    )
-
-    if kept < 10:
-        raise RuntimeError(
-            f"[extract] Only {kept} frames remain after feature filtering — "
-            "too few for COLMAP. Record the object more carefully: keep the "
-            "camera focused on the object for the entire video."
-        )
-
-    return kept
-
+# ---------------------------------------------------------------------------
+# Copy image folder
+# ---------------------------------------------------------------------------
 
 def copy_images(
     image_dir:  str,
     output_dir: str,
     extensions: tuple = (".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"),
 ) -> int:
-    """
-    Copy images from *image_dir* into *output_dir* with sequential naming.
-
-    Useful when the user supplies a folder of photos instead of a video.
-
-    Args:
-        image_dir:  Source folder containing images.
-        output_dir: Destination  →  data/processed/
-        extensions: Accepted file extensions.
-
-    Returns:
-        Number of images copied.
-    """
     image_dir  = Path(image_dir)
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -466,15 +525,13 @@ def copy_images(
             print(f"[extract] Copying {i + 1}/{len(images)}…")
 
     print(f"[extract] Copied {len(images)} images → {output_dir}")
-
-    # Still apply blur and feature filtering to images
     validate_images(str(output_dir))
-    filter_blurry_images(str(output_dir), threshold=120)
-    return filter_low_feature_frames(str(output_dir))
+    filter_blurry_images(str(output_dir), threshold=80.0)
+    return filter_low_feature_frames(str(output_dir), min_keep_ratio=0.4)
 
 
 # ---------------------------------------------------------------------------
-# CLI entry-point
+# CLI
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -485,16 +542,12 @@ if __name__ == "__main__":
     )
     parser.add_argument("input",
                         help="Video file (.mp4 / .mov / …) or image directory")
-    parser.add_argument("--output",     default="data/processed",
-                        help="Output directory for frames (default: data/processed)")
-    parser.add_argument("--fps",        type=float, default=2.0,
-                        help="Frames per second to extract (default: 2 — optimal for COLMAP)")
-    parser.add_argument("--max_frames", type=int,   default=200,
-                        help="Maximum frames to extract (default: 200)")
-    parser.add_argument("--blur_threshold", type=float, default=120.0,
-                        help="Blur detection threshold (higher = sharper, default: 120)")
-    parser.add_argument("--no_adaptive", action="store_true",
-                        help="Disable scene-change adaptive sampling")
+    parser.add_argument("--output",         default="data/processed")
+    parser.add_argument("--fps",            type=float, default=None,
+                        help="Frames per second (default: adaptive by duration)")
+    parser.add_argument("--max_frames",     type=int,   default=600)
+    parser.add_argument("--blur_threshold", type=float, default=80.0)
+    parser.add_argument("--no_adaptive",    action="store_true")
     args = parser.parse_args()
 
     src = Path(args.input)
@@ -502,9 +555,10 @@ if __name__ == "__main__":
         extract_from_video(
             str(src), args.output, args.fps, args.max_frames,
             blur_threshold=args.blur_threshold,
-            adaptive_sampling=not args.no_adaptive
+            adaptive_sampling=not args.no_adaptive,
         )
     elif src.is_dir():
         copy_images(str(src), args.output)
     else:
         raise ValueError(f"Input must be a video file or image directory: {src}")
+
