@@ -341,7 +341,7 @@ class GaussianTrainer:
                 ssims.append((1.0 - ssim_metric(rendered, gt_dev)).item())  # ssim_metric returns (1-SSIM)
         self.model.train()
         avg_psnr = np.mean(psnrs)
-        avg_ssim = 1.0 - np.mean(ssims)  # convert back to SSIM ↑
+        avg_ssim = 1.0 - np.mean(ssims)  # convert back to SSIM
         record = {"iter": iteration, "psnr": round(avg_psnr, 3), "ssim": round(avg_ssim, 4)}
         self.eval_log.append(record)
         print(f"[Eval  ] iter={iteration:6d}  PSNR={avg_psnr:.2f} dB  SSIM={avg_ssim:.4f}")
