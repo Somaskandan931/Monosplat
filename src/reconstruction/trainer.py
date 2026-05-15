@@ -338,10 +338,11 @@ class GaussianTrainer:
                 rendered = self.renderer(self.model, cam)
                 gt_dev   = gt.to(self.device)
                 psnrs.append(psnr_metric(rendered, gt_dev).item())
-                ssims.append((1.0 - ssim_metric(rendered, gt_dev)).item())  # ssim_metric returns (1-SSIM)
+                # ssim_metric returns (1 - SSIM); subtract from 1 to get raw SSIM score
+                ssims.append(1.0 - ssim_metric(rendered, gt_dev).item())
         self.model.train()
         avg_psnr = np.mean(psnrs)
-        avg_ssim = 1.0 - np.mean(ssims)  # convert back to SSIM
+        avg_ssim = np.mean(ssims)   # already raw SSIM (higher = better)
         record = {"iter": iteration, "psnr": round(avg_psnr, 3), "ssim": round(avg_ssim, 4)}
         self.eval_log.append(record)
         print(f"[Eval  ] iter={iteration:6d}  PSNR={avg_psnr:.2f} dB  SSIM={avg_ssim:.4f}")

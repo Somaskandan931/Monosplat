@@ -26,14 +26,20 @@ def is_jupyter() -> bool:
         return False
 
 
-def has_cuda_colmap() -> bool:
+def _colmap_binary(colmap_binary: str = "colmap") -> str:
+    import shutil
+    found = shutil.which(colmap_binary)
+    return found or colmap_binary
+
+
+def has_cuda_colmap(colmap_binary: str = "colmap") -> bool:
     """
     Return True if the installed COLMAP binary was built with CUDA support.
     Checks for CUDA mention in colmap --help output.
     """
     try:
         result = subprocess.run(
-            ["colmap", "--help"],
+            [_colmap_binary(colmap_binary), "-h"],
             capture_output=True, text=True, timeout=10
         )
         output = (result.stdout + result.stderr).lower()
@@ -65,32 +71,45 @@ def has_torch_gpu() -> bool:
         return False
 
 
-def should_use_gpu() -> bool:
+def should_use_gpu(colmap_binary: str = "colmap") -> bool:
     """
     Master switch: should COLMAP SiftExtraction use GPU?
 
     Rules (in priority order):
-      1. If we're in Colab                          → CPU (OpenGL unstable)
-      2. If no OpenGL context detected              → CPU
-      3. If COLMAP wasn't built with CUDA           → CPU
-      4. Otherwise                                  → GPU
+      1. Windows desktop                            → CPU (GPU SIFT often crashes)
+      2. If we're in Colab                          → CPU (OpenGL unstable)
+      3. If no OpenGL context detected              → CPU
+      4. If COLMAP wasn't built with CUDA           → CPU
+      5. Otherwise                                  → GPU
     """
+    if sys.platform == "win32":
+        return False
     if is_colab():
         return False
     if not has_opengl_context():
         return False
-    if not has_cuda_colmap():
+    if not has_cuda_colmap(colmap_binary):
         return False
     return True
 
 
-def should_use_matching_gpu() -> bool:
+def should_use_matching_gpu(colmap_binary: str = "colmap") -> bool:
     """
-    Feature *matching* is safe on GPU even in headless environments
-    because it doesn't require an OpenGL context.
-    Returns True when a CUDA COLMAP build is present.
+    Feature *matching* on GPU — disabled on Windows where it often crashes
+  (exit code 3221225786).
     """
-    return has_cuda_colmap()
+    if sys.platform == "win32":
+        return False
+    return has_cuda_colmap(colmap_binary)
+
+
+def should_run_dense_mvs() -> bool:
+    """
+    Dense COLMAP MVS (patch_match_stereo) — skip on Windows where COLMAP's
+    GPU MVS is unreliable (exit code 3221225786).  Does NOT require PyTorch
+    GPU — COLMAP MVS is a standalone COLMAP command, not a PyTorch operation.
+    """
+    return sys.platform != "win32"
 
 
 def get_env_info() -> dict:
@@ -103,6 +122,7 @@ def get_env_info() -> dict:
         "has_torch_gpu":       has_torch_gpu(),
         "colmap_extraction_gpu": should_use_gpu(),
         "colmap_matching_gpu":   should_use_matching_gpu(),
+        "colmap_dense_mvs":      should_run_dense_mvs(),
     }
 
 

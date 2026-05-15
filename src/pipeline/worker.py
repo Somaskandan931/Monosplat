@@ -24,6 +24,10 @@ import traceback
 from pathlib import Path
 from typing import Callable, Optional
 
+from src.utils.console import configure_console_encoding
+
+configure_console_encoding()
+
 
 STAGES = [
     ("EXTRACTING",  5,  "Extracting frames from video"),
@@ -126,16 +130,16 @@ def _compute_ssim(pred, gt) -> float:
 
 def _count_registered(text_model: Path) -> tuple:
     """
-    Returns (registered, total_in_file) from images.txt.
+    Returns (registered, total_data_lines // 2) from images.txt.
 
     images.txt format (COLMAP text):
         # comment lines
         IMAGE_ID QW QX QY QZ TX TY TZ CAMERA_ID NAME   ← image header line (9+ tokens)
         POINTS2D[] as (X, Y, POINT3D_ID) ...            ← keypoint line (variable tokens)
 
-    The two lines alternate, so we only count odd-numbered non-comment lines
-    (i.e., every other line starting from the first data line) to avoid
-    double-counting image headers and their keypoint continuation lines.
+    The two lines alternate, so we only count even-indexed non-comment lines
+    (0, 2, 4 …) as registered images.  total = data_lines // 2 gives the same
+    count and is the correct denominator for the registration ratio.
     """
     images_txt = text_model / "images.txt"
     if not images_txt.exists():
@@ -152,7 +156,8 @@ def _count_registered(text_model: Path) -> tuple:
             if data_line_idx % 2 == 0:
                 registered += 1
             data_line_idx += 1
-    return registered, registered
+    total = data_line_idx // 2  # each registered image contributes exactly 2 data lines
+    return registered, total
 
 
 def run_pipeline(
@@ -175,27 +180,55 @@ def run_pipeline(
 
     metrics: dict = {"job_id": job_id, "started_at": time.time()}
 
-    from src.utils.env_detect import has_torch_gpu
+    from src.utils.config_loader import load_config
+    from src.utils.env_detect import has_torch_gpu, should_run_dense_mvs
+
+    cfg = load_config(config_path)
     has_gpu = has_torch_gpu()
     print(f"[worker] GPU available: {has_gpu}")
 
+    video_fps = getattr(cfg.data, "video_fps", 5)
+    max_frames = getattr(cfg.data, "max_frames", 200)
+    colmap_binary = getattr(cfg.colmap, "binary_path", colmap_binary)
+    colmap_quality = getattr(cfg.colmap, "quality", "medium")
+    colmap_camera_model = getattr(cfg.colmap, "camera_model", "OPENCV")
+    colmap_single_camera = getattr(cfg.colmap, "single_camera", True)
+
+    _VIDEO_EXT = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
+
     try:
         # ----------------------------------------------------------------
-        # STAGE 1 — Frame extraction
+        # STAGE 1 — Frame extraction (FFmpeg video or image folder)
         # ----------------------------------------------------------------
-        _set_stage(registry, job_id, "EXTRACTING", 5, "Extracting frames with FFmpeg…")
+        _set_stage(registry, job_id, "EXTRACTING", 5, "Extracting frames…")
 
-        from src.preprocessing.extract_frames import extract_from_video, estimate_motion
-
-        # fps=None → adaptive by duration (item 1)
-        n_frames = extract_from_video(
-            str(input_path),
-            output_dir=str(frames_dir),
-            fps=None,           # adaptive FPS
-            max_frames=600,     # item 8: increased max frames
-            blur_threshold=80.0,
-            adaptive_sampling=False,
+        from src.preprocessing.extract_frames import (
+            extract_from_video, copy_images, estimate_motion,
+            validate_image_resolution,
         )
+
+        if input_path.is_dir():
+            n_frames = copy_images(str(input_path), str(frames_dir))
+        elif input_path.suffix.lower() in _VIDEO_EXT:
+            n_frames = extract_from_video(
+                str(input_path),
+                output_dir=str(frames_dir),
+                fps=float(video_fps),
+                max_frames=int(max_frames),
+                blur_threshold=80.0,
+                adaptive_sampling=False,
+            )
+        else:
+            raise RuntimeError(
+                f"Unsupported input: {input_path}. "
+                "Upload a video (MP4/MOV/AVI/MKV) or a folder of JPG/PNG images."
+            )
+
+        # Hard-fail immediately if FFmpeg produced tiny/corrupt frames.
+        # This must run before blur/feature filtering (which can silently pass
+        # 12px images through) and well before COLMAP is invoked.
+        validate_image_resolution(str(frames_dir), min_size=256)
+
         metrics["num_frames"] = n_frames
 
         # Input validation (item 7)
@@ -226,12 +259,12 @@ def run_pipeline(
         except ImportError:
             pass
 
-        # Auto re-sample if still too few frames after extraction
-        if n_frames < 20:
+        # Auto re-sample if still too few frames after video extraction
+        if input_path.is_file() and n_frames < 20:
             # fps=None (adaptive) produced too few frames — force a higher fixed fps.
             # Repeating the same adaptive call would yield the same result.
-            fps_retry = 5
-            print(f"[worker] ⚠  Only {n_frames} frames — triggering re-extraction at fps={fps_retry}…")
+            fps_retry = min(int(video_fps) + 2, 10)
+            print(f"[worker] WARN  Only {n_frames} frames — triggering re-extraction at fps={fps_retry}…")
             _set_stage(registry, job_id, "EXTRACTING", 12, f"Too few frames ({n_frames}) — re-extracting at fps={fps_retry}…")
             import shutil as _shutil
             _shutil.rmtree(str(frames_dir), ignore_errors=True)
@@ -240,7 +273,7 @@ def run_pipeline(
                 str(input_path),
                 output_dir=str(frames_dir),
                 fps=fps_retry,
-                max_frames=600,
+                max_frames=int(max_frames),
                 blur_threshold=80.0,
                 adaptive_sampling=False,
             )
@@ -267,6 +300,10 @@ def run_pipeline(
         _set_stage(registry, job_id, "COLMAP", 25, "Running COLMAP feature extraction…")
         t_colmap = time.time()
 
+        # Fix #12: verify the exact folder being passed to COLMAP
+        print(f"[worker] [COLMAP] image_dir = {frames_dir}")
+        print(f"[worker] [COLMAP] Contents: {[p.name for p in sorted(frames_dir.iterdir()) if p.is_file()][:10]}")
+
         def colmap_progress(step, line):
             _update_job(registry, job_id, message=f"[COLMAP] {step}: {line[:80]}")
             if on_progress:
@@ -278,8 +315,10 @@ def run_pipeline(
             image_dir=str(frames_dir),
             output_dir=str(colmap_dir),
             colmap_binary=colmap_binary,
-            use_gpu=True,   # GPU enabled (item 10)
-            quality="medium",
+            camera_model=colmap_camera_model,
+            single_camera=colmap_single_camera,
+            use_gpu=True,
+            quality=colmap_quality,
             on_progress=colmap_progress,
         )
 
@@ -311,8 +350,10 @@ def run_pipeline(
                 image_dir=str(frames_dir),
                 output_dir=str(colmap_dir),
                 colmap_binary=colmap_binary,
+                camera_model=colmap_camera_model,
+                single_camera=colmap_single_camera,
                 use_gpu=True,
-                quality="low",   # relaxed thresholds
+                quality="low",
                 on_progress=colmap_progress,
             )
 
@@ -341,7 +382,7 @@ def run_pipeline(
         # Only runs if we have enough registered frames to be worthwhile.
         # ----------------------------------------------------------------
         dense_dir = work_dir_path / "colmap" / "dense"
-        if registered >= 10:
+        if registered >= 10 and should_run_dense_mvs():
             _set_stage(registry, job_id, "COLMAP", 57, "Running dense reconstruction…")
             try:
                 sparse_0 = colmap_dir / "sparse" / "0"
@@ -394,8 +435,10 @@ def run_pipeline(
 
             except Exception as e:
                 print(f"[worker] ⚠  Dense reconstruction skipped: {e}")
+        elif registered < 10:
+            print(f"[worker] Skipping dense reconstruction — only {registered} frames registered (need >=10)")
         else:
-            print(f"[worker] Skipping dense reconstruction — only {registered} frames registered (need ≥10)")
+            print("[worker] Skipping dense reconstruction on this platform (use sparse model for training)")
 
         # ----------------------------------------------------------------
         # STAGE 3 — Training (GPU only)
@@ -422,9 +465,6 @@ def run_pipeline(
 
         _set_stage(registry, job_id, "TRAINING", 60, "Starting Gaussian Splat training on GPU…")
         t_train = time.time()
-
-        from src.utils.config_loader import load_config
-        cfg = load_config(config_path)
 
         device = "cuda"
         print(f"[worker] Training device: {device}")
@@ -544,14 +584,20 @@ def run_pipeline(
         # Do NOT pass it to update_job — ModelJob has no metrics field and
         # setattr would add it dynamically but it won't survive registry serialisation.
 
+        rel = lambda p: str(Path(p).as_posix())
         _set_stage(
             registry, job_id,
             "READY", 100,
-            f"✅ Ready — {len(model):,} splats | "
+            f"Ready — {len(model):,} splats | "
             f"PSNR={metrics.get('psnr', 'n/a')} | "
             f"SSIM={metrics.get('ssim', 'n/a')}"
         )
-        _update_job(registry, job_id, status="ready")
+        _update_job(
+            registry, job_id,
+            status="ready",
+            ply_path=rel(ply_path),
+            splat_path=rel(splat_path),
+        )
 
     except Exception as exc:
         tb = traceback.format_exc()

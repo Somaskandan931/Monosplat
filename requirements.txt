@@ -10,6 +10,7 @@ numpy>=1.24.0
 #   Windows: https://ffmpeg.org/download.html
 Pillow>=9.5.0
 imageio>=2.31.0
+opencv-python>=4.8.0   # motion estimation, blur/feature filters (Stage 1)
 
 # 3D / Math
 scipy>=1.10.0

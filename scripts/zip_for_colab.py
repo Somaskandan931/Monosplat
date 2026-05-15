@@ -10,8 +10,17 @@ Example:
 """
 
 import argparse
+import sys
 import zipfile
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+from src.utils.console import configure_console_encoding
+
+configure_console_encoding()
+
 
 def zip_job_for_colab(job_id: str, work_dir: str = "work") -> str:
     """Zip frames and colmap directories for a job ID."""
@@ -34,12 +43,19 @@ def zip_job_for_colab(job_id: str, work_dir: str = "work") -> str:
             if f.is_file():
                 zf.write(f, f"work/{job_id}/frames/{f.name}")
 
-        # Add COLMAP output (sparse_text only — the three text files)
+        # COLMAP sparse text model (required for training)
         sparse_text = colmap_dir / "sparse_text"
         if sparse_text.exists():
             for f in sparse_text.rglob("*"):
                 if f.is_file():
                     zf.write(f, f"work/{job_id}/colmap/sparse_text/{f.name}")
+
+        # COLMAP binary sparse model (fallback for some loaders)
+        sparse0 = colmap_dir / "sparse" / "0"
+        if sparse0.exists():
+            for f in sparse0.rglob("*"):
+                if f.is_file():
+                    zf.write(f, f"work/{job_id}/colmap/sparse/0/{f.name}")
 
         # Add config
         config_path = Path("config/config.yaml")
@@ -55,7 +71,7 @@ def zip_job_for_colab(job_id: str, work_dir: str = "work") -> str:
                     if f.is_file() and "__pycache__" not in str(f):
                         zf.write(f, str(f))
 
-    print(f"✅ Created {zip_name}")
+    print(f"[zip] Created {zip_name}")
     print(f"   Size: {Path(zip_name).stat().st_size / 1e6:.1f} MB")
     print(f"\nUpload this file to Colab and run the notebook.")
     return zip_name

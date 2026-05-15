@@ -323,8 +323,8 @@ class PipelineWorker:
         input_path  = str(videos[0]) if videos else str(upload_path)
 
         log_dir  = Path("outputs/logs")
-        log_file = open(log_dir / f"{job.job_id}.log", "w", encoding="utf-8") \
-                   if log_dir.exists() else None
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_file = open(log_dir / f"{job.job_id}.log", "w", encoding="utf-8")
 
         def on_progress(step: str, line: str):
             msg = f"[COLMAP] {step}: {line[:80]}"

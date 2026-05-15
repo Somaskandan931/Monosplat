@@ -21,6 +21,10 @@ import threading
 from queue import Queue as ThreadQueue
 from typing import Optional
 
+from src.utils.console import configure_console_encoding
+
+configure_console_encoding()
+
 # ---------------------------------------------------------------------------
 # Redis / RQ (optional — graceful fallback if not installed)
 # ---------------------------------------------------------------------------
@@ -45,10 +49,10 @@ def _init_redis_queue() -> bool:
         conn.ping()  # raises if Redis is not running
         _rq_queue = RQQueue("monosplat", connection=conn)
         _mode = "redis"
-        print("[queue] ✓  Redis connected — using RQ distributed queue")
+        print("[queue] OK  Redis connected — using RQ distributed queue")
         return True
     except Exception as e:
-        print(f"[queue] ⚠  Redis not available ({e}) — falling back to thread queue")
+        print(f"[queue] WARN  Redis not available ({e}) — falling back to thread queue")
         return False
 
 
@@ -57,7 +61,7 @@ def _init_thread_queue() -> None:
     global _thread_queue, _mode
     _thread_queue = ThreadQueue()
     _mode = "thread"
-    print("[queue] ✓  Thread queue initialized (single-process mode)")
+    print("[queue] OK  Thread queue initialized (single-process mode)")
 
 
 def initialize(prefer_redis: bool = True) -> str:

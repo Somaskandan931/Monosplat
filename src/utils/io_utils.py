@@ -10,7 +10,6 @@ Performance improvements over original:
 """
 
 import json
-import pickle
 from pathlib import Path
 from typing import Dict, Any, Optional
 
@@ -112,21 +111,23 @@ def save_image(path: str, img: np.ndarray) -> None:
 # ---------------------------------------------------------------------------
 
 def save_checkpoint(path: str, state: Dict[str, Any]) -> None:
-    """Save training checkpoint as pickle."""
+    """Save training checkpoint using torch.save (safe across Python versions)."""
+    import torch
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "wb") as f:
-        pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
+    # Use a .pt extension internally; the caller may pass .pkl — we honour the
+    # given path but write torch format regardless.
+    torch.save(state, str(path))
     print(f"[io] Checkpoint saved → {path}")
 
 
 def load_checkpoint(path: str) -> Dict[str, Any]:
-    """Load training checkpoint from pickle."""
+    """Load training checkpoint saved by save_checkpoint."""
+    import torch
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
-    with open(path, "rb") as f:
-        state = pickle.load(f)
+    state = torch.load(str(path), map_location="cpu", weights_only=False)
     print(f"[io] Checkpoint loaded ← {path}")
     return state
 
@@ -181,8 +182,9 @@ def save_splat(path: str, gaussians: Dict[str, np.ndarray]) -> None:
     rgba[:, :3] = np.clip(colors * 255.0, 0, 255).astype(np.uint8)
     rgba[:, 3]  = np.clip(opacities * 255.0, 0, 255).astype(np.uint8)
 
-    # Pack quaternion as uint8 (map [-1,1] → [0,255])
-    rot_u8 = np.clip((rotations + 1.0) / 2.0 * 255.0, 0, 255).astype(np.uint8)
+    # Pack quaternion as uint8 — antimatter15 / gaussian-splats-3d format:
+    # byte order [w, x, y, z], decoded as (byte - 128) / 128
+    rot_u8 = np.clip(rotations * 128.0 + 128.0, 0, 255).astype(np.uint8)
 
     # Build flat byte buffer: [xyz | scale | rgba | rot] per splat
     buf = np.empty((n, _SPLAT_BYTES), dtype=np.uint8)
@@ -194,6 +196,31 @@ def save_splat(path: str, gaussians: Dict[str, np.ndarray]) -> None:
     path.write_bytes(buf.tobytes())
     size_mb = buf.nbytes / 1e6
     print(f"[io] Saved .splat → {path} ({n:,} splats, {size_mb:.1f} MB)")
+
+
+def splat_bounds(path: str) -> Dict[str, Any]:
+    """
+    Compute scene center and radius from a .splat file for camera framing.
+    """
+    path = Path(path)
+    if not path.exists():
+        raise FileNotFoundError(f".splat file not found: {path}")
+
+    raw = np.frombuffer(path.read_bytes(), dtype=np.uint8)
+    n = len(raw) // _SPLAT_BYTES
+    if n == 0:
+        raise ValueError(f"Empty or invalid .splat file: {path}")
+
+    positions = raw[: n * _SPLAT_BYTES].reshape(n, _SPLAT_BYTES)[:, :12].view(np.float32).reshape(n, 3)
+    center = positions.mean(axis=0)
+    radius = float(np.percentile(np.linalg.norm(positions - center, axis=1), 90))
+    radius = max(radius, 0.05)
+
+    return {
+        "center": [float(center[0]), float(center[1]), float(center[2])],
+        "radius": radius,
+        "num_splats": n,
+    }
 
 
 def load_splat_as_gaussians(path: str) -> Dict[str, np.ndarray]:
@@ -215,7 +242,7 @@ def load_splat_as_gaussians(path: str) -> Dict[str, np.ndarray]:
 
     colors    = rgba[:, :3] / 255.0
     opacities = (rgba[:, 3] / 255.0)[:, None]
-    rotations = rot_u8 / 255.0 * 2.0 - 1.0   # [0,255] → [-1,1]
+    rotations = (rot_u8.astype(np.float32) - 128.0) / 128.0
 
     print(f"[io] Loaded .splat ← {path} ({n:,} splats)")
     return {

@@ -13,7 +13,7 @@ data:
 
 colmap:
   binary_path: "colmap"
-  quality: "high"           # Use high for objects — more SIFT features needed
+  quality: "medium"         # low / medium / high — README default
   camera_model: "OPENCV"
   single_camera: true
 

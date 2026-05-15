@@ -36,6 +36,11 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
+from src.utils.console import configure_console_encoding, ensure_project_dirs
+
+configure_console_encoding()
+ensure_project_dirs()
+
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
@@ -79,7 +84,7 @@ async def lifespan(app: FastAPI):
     manager.start()
     mode = init_queue(prefer_redis=True)
     print(f"[server] Queue mode: {mode}")
-    print("[server] MonoSplat server started ✓")
+    print("[server] MonoSplat server started")
     yield
     if manager:
         manager.stop()
@@ -305,6 +310,34 @@ async def latest_model():
     return JSONResponse(latest.to_dict())
 
 
+def _tool_status() -> dict:
+    """Check external tools required by the README quick-start."""
+    import shutil
+    import subprocess
+
+    ffmpeg_ok = bool(shutil.which("ffmpeg"))
+    colmap_path = shutil.which("colmap")
+    colmap_ok = bool(colmap_path)
+    colmap_version = None
+    if colmap_ok:
+        try:
+            result = subprocess.run(
+                [colmap_path, "-h"],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            colmap_version = (result.stdout or result.stderr).splitlines()[0][:120]
+        except Exception:
+            colmap_version = "unknown"
+
+    return {
+        "ffmpeg": ffmpeg_ok,
+        "colmap": colmap_ok,
+        "colmap_version": colmap_version,
+    }
+
+
 @app.get("/api/health")
 async def health():
     """
@@ -328,11 +361,15 @@ async def health():
         except Exception:
             pass
 
+    tools = _tool_status()
+    ready = tools["ffmpeg"] and tools["colmap"]
+
     return JSONResponse({
-        "status":       "ok",
+        "status":       "ok" if ready else "degraded",
         "uptime_s":     round(time.time() - _START_TIME, 1),
         "queue_mode":   get_mode(),
         "redis_ok":     redis_ok,
+        "tools":        tools,
         "jobs": {
             "total":    len(all_jobs),
             "ready":    ready,
@@ -540,20 +577,51 @@ async def splat_viewer(job_id: str):
             """
         )
 
-    if job.splat_path is None:
+    splat_file = Path(job.splat_path) if job.splat_path else None
+    if splat_file is None or not splat_file.exists():
         return HTMLResponse(
-            f"<h2 style='font-family:monospace;padding:2rem'>"
-            f"Model not ready yet — status: {job.status}</h2>"
+            f"""<!DOCTYPE html><html><body style="font-family:monospace;background:#0a0c0f;color:#c8d0dc;padding:2rem">
+            <h2 style="color:#f5b84b">Splat file not found</h2>
+            <p>Status is <code>{job.status}</code> but no .splat exists at:</p>
+            <p><code>{job.splat_path or '(not set)'}</code></p>
+            <p>GPU training must finish first. On desktop the pipeline stops at
+            <code>ready_for_colab</code> — train in Colab, download
+            <code>{job_id}.splat</code>, place it in
+            <code>work/{job_id}/models/gaussian/</code>, then run:</p>
+            <pre style="background:#111418;padding:1rem;border-radius:6px">python scripts/mark_ready.py {job_id}</pre>
+            <p><a href="/" style="color:#00e5a0">Back to portal</a></p>
+            </body></html>"""
         )
 
+    from src.utils.io_utils import splat_bounds
+    try:
+        bounds = splat_bounds(str(splat_file))
+    except Exception:
+        bounds = {"center": [0, 0, 0], "radius": 2.0, "num_splats": 0}
+
+    cx, cy, cz = bounds["center"]
+    r = bounds["radius"]
+    cam_pos = [cx, cy - r * 1.5, cz + r * 2.5]
+    cam_look = [cx, cy, cz]
+
     splat_url = f"/splat/{job_id}"
+    ply_url   = f"/ply/{job_id}" if job.ply_path and Path(job.ply_path).exists() else ""
     item_name = job.item_name
+    num_splats = bounds.get("num_splats", 0)
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <title>{item_name} — MonoSplat Viewer</title>
+  <script type="importmap">
+  {{
+    "imports": {{
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "@mkkellogg/gaussian-splats-3d": "https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@0.4.6/build/gaussian-splats-3d.module.js"
+    }}
+  }}
+  </script>
   <style>
     *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
     body   {{ background: #0a0c0f; color: #fff; font-family: monospace; overflow: hidden; }}
@@ -610,66 +678,92 @@ async def splat_viewer(job_id: str):
 <div id="metrics" style="display:none">
   <span class="label">PSNR</span><span class="val" id="m-psnr">—</span><br>
   <span class="label">SSIM</span><span class="val" id="m-ssim">—</span><br>
-  <span class="label">Gaussians</span><span class="val" id="m-gauss">—</span>
+  <span class="label">Gaussians</span><span class="val" id="m-gauss">{num_splats:,}</span>
 </div>
 
 <a id="back" href="/">← Back</a>
+<p id="fallback" style="display:none;position:fixed;bottom:16px;right:16px;font-size:11px;color:#8b98aa;max-width:320px;text-align:right">
+  Viewer failed? <a href="https://supersplat.playcanvas.com" style="color:#00e5a0" target="_blank">Open SuperSplat</a>
+  and drag <a href="{splat_url}" style="color:#00e5a0" download>the .splat file</a>.
+</p>
 
 <script type="module">
-import * as GaussianSplats3D from
-  'https://cdn.jsdelivr.net/npm/@mkkellogg/gaussian-splats-3d@latest/build/gaussian-splats-3d.module.js';
-
 const loading = document.getElementById('loading');
 const bar     = document.getElementById('bar');
 const msg     = document.getElementById('msg');
 const hud     = document.getElementById('hud');
 const metrics = document.getElementById('metrics');
+const fallback = document.getElementById('fallback');
 
-// Load quality metrics from API
-fetch('/api/jobs/{job_id}/metrics')
-  .then(r => r.json())
-  .then(d => {{
-    if (d.psnr) document.getElementById('m-psnr').textContent = d.psnr + ' dB';
-    if (d.ssim) document.getElementById('m-ssim').textContent = d.ssim;
-    if (d.num_gaussians) document.getElementById('m-gauss').textContent =
-      (d.num_gaussians / 1e6).toFixed(2) + 'M';
-  }}).catch(() => {{}});
+function showError(text) {{
+  msg.textContent = text;
+  msg.style.color = '#ff4757';
+  fallback.style.display = 'block';
+}}
 
-const viewer = new GaussianSplats3D.Viewer({{
-  cameraUp:              [0, -1, 0],
-  initialCameraPosition: [0,  0,  5],
-  initialCameraLookAt:   [0,  0,  0],
-  selfDrivenMode:        true,
-}});
+const CAM_POS  = {cam_pos};
+const CAM_LOOK = {cam_look};
+let viewer = null;
 
-msg.textContent = 'Downloading splat data…';
-bar.style.width = '20%';
+try {{
+  const GaussianSplats3D = await import('@mkkellogg/gaussian-splats-3d');
 
-viewer.addSplatScene('{splat_url}', {{
-  splatAlphaRemovalThreshold: 5,
-  onProgress: pct => {{
-    bar.style.width = (20 + pct * 0.8) + '%';
-    msg.textContent = 'Loading… ' + Math.round(pct) + '%';
-  }},
-}})
-.then(() => {{
+  fetch('/api/jobs/{job_id}/metrics')
+    .then(r => r.json())
+    .then(d => {{
+      if (d.psnr) document.getElementById('m-psnr').textContent = d.psnr + ' dB';
+      if (d.ssim) document.getElementById('m-ssim').textContent = d.ssim;
+      if (d.num_gaussians) document.getElementById('m-gauss').textContent =
+        d.num_gaussians >= 1000 ? (d.num_gaussians / 1000).toFixed(1) + 'k' : String(d.num_gaussians);
+    }}).catch(() => {{}});
+
+  msg.textContent = 'Downloading splat…';
+  bar.style.width = '15%';
+
+  const response = await fetch('{splat_url}');
+  if (!response.ok) throw new Error('Splat download failed (HTTP ' + response.status + ')');
+  const buffer = await response.arrayBuffer();
+  bar.style.width = '40%';
+  msg.textContent = 'Parsing ' + Math.round(buffer.byteLength / 1024) + ' KB…';
+
+  const splatBuffer = await GaussianSplats3D.SplatLoader.loadFromFileData(
+    buffer, 1, 0, true
+  );
+
+  bar.style.width = '70%';
+  msg.textContent = 'Starting renderer…';
+
+  viewer = new GaussianSplats3D.Viewer({{
+    cameraUp:               [0, -1, 0],
+    initialCameraPosition:  CAM_POS,
+    initialCameraLookAt:    CAM_LOOK,
+    selfDrivenMode:         true,
+    sharedMemoryForWorkers: false,
+    integerBasedSort:       false,
+  }});
+
+  await viewer.addSplatBuffers([splatBuffer], [{{
+    splatAlphaRemovalThreshold: 1,
+  }}]);
+
   bar.style.width = '100%';
-  setTimeout(() => {{
-    loading.style.display = 'none';
-    hud.style.display = 'block';
-    metrics.style.display = 'block';
-  }}, 300);
   viewer.start();
-}})
-.catch(err => {{
-  msg.textContent  = 'Error: ' + err.message;
-  msg.style.color  = '#ff4757';
-}});
+
+  loading.style.display = 'none';
+  hud.style.display = 'block';
+  metrics.style.display = 'block';
+
+}} catch (err) {{
+  console.error(err);
+  showError('Error: ' + (err.message || err));
+}}
 
 document.addEventListener('keydown', e => {{
+  if (!viewer) return;
   if (e.key === 'r' || e.key === 'R') {{
-    viewer.getCamera().position.set(0, 0, 5);
-    viewer.getCamera().lookAt(0, 0, 0);
+    viewer.getCamera().position.set(CAM_POS[0], CAM_POS[1], CAM_POS[2]);
+    if (viewer.controls) viewer.controls.target.set(CAM_LOOK[0], CAM_LOOK[1], CAM_LOOK[2]);
+    viewer.getCamera().lookAt(CAM_LOOK[0], CAM_LOOK[1], CAM_LOOK[2]);
   }}
 }});
 </script>
