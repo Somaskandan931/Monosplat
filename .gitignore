@@ -40,11 +40,15 @@ outputs/videos/*
 work/
 uploads/
 
-# ── Archives (IMPORTANT: prevent Colab zip uploads) ────────────────
+# ── Archives (IMPORTANT: prevent accidental zip uploads to Colab) ──
+# Covers: src.zip, cd24904e9fa0_for_colab.zip, and any other archives
 *.zip
 *.tar
 *.gz
 *.7z
+*.rar
+*.tar.gz
+*.tar.bz2
 
 # ── Jupyter ────────────────────────────────────────────────────────
 .ipynb_checkpoints/
