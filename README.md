@@ -1,4 +1,4 @@
- MonoSplat
+ # MonoSplat
 
 > Single-camera 3D Gaussian Splat reconstruction pipeline — record a video, use RealityScan for alignment, train with Lichtfeld on GPU, view the 3D splat in your browser.
 
