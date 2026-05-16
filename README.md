@@ -1,24 +1,26 @@
- # MonoSplat
+# MonoSplat
 
-> Single-camera 3D Gaussian Splat reconstruction pipeline — record a video, use RealityScan for alignment, train with Lichtfeld on GPU, view the 3D splat in your browser.
+> Single-camera 3D Gaussian Splat reconstruction pipeline — record a video,
+> run COLMAP for camera alignment, train with PyTorch on GPU, view the 3D splat in your browser.
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-teal)
 ![FFmpeg](https://img.shields.io/badge/FFmpeg-required-red)
-![RealityScan](https://img.shields.io/badge/RealityScan-SfM-purple)
-![Lichtfeld](https://img.shields.io/badge/Lichtfeld-training-green)
+![COLMAP](https://img.shields.io/badge/COLMAP-3.8+-purple)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 ---
 
 ## What Is This?
 
-MonoSplat is an end-to-end pipeline that takes a single video input and reconstructs a photorealistic 3D Gaussian Splat scene you can navigate in your browser — no desktop app, no OpenGL setup required.
+MonoSplat is an end-to-end pipeline that takes a single video input and reconstructs a
+photorealistic 3D Gaussian Splat scene you can navigate in your browser — no desktop app,
+no OpenGL setup required.
 
 ```
-Video Input  →  Frame Extraction  →  Camera Poses      →  Gaussian Training  →  Browser Viewer
-   MP4/MOV         FFmpeg            RealityScan (SfM)      Lichtfeld              Three.js
+Video Input  →  Frame Extraction  →  Camera Poses  →  Gaussian Training  →  Browser Viewer
+   MP4/MOV         FFmpeg              COLMAP (SfM)     PyTorch (GPU)          Three.js
 ```
 
 ### Pipeline Stack
@@ -26,14 +28,14 @@ Video Input  →  Frame Extraction  →  Camera Poses      →  Gaussian Trainin
 | Stage | Tool | Why |
 |-------|------|-----|
 | Frame extraction | **FFmpeg** | Fast, stable, broad codec support |
-| Camera alignment (SfM) | **RealityScan** | Geometry-based, real camera poses from real captured video |
-| Gaussian Splat training | **Lichtfeld** | GPU-accelerated, high-quality 3D Gaussian output |
-| Browser viewer | Three.js | Zero-install, cross-platform, real-time |
+| Camera alignment (SfM) | **COLMAP** | Geometry-based, real camera poses from real captured video |
+| Gaussian Splat training | **Custom PyTorch** | GPU-accelerated, high-quality 3D Gaussian output |
+| Browser viewer | **Three.js** | Zero-install, cross-platform, real-time |
 
 This pipeline is:
-- ✔ Geometry-based
-- ✔ Uses real camera poses
-- ✔ Works on real captured videos
+- ✔ Geometry-based (real camera poses, not neural approximations)
+- ✔ Works on real captured phone videos
+- ✔ Fully open source
 
 ---
 
@@ -44,12 +46,10 @@ Creating high-quality 3D reconstructions traditionally requires:
 - Complex photogrammetry workflows
 - Heavy rendering pipelines that are not real-time
 
-This creates a barrier for students, developers, and creators who want to explore spatial computing.
-
 MonoSplat addresses this by enabling:
 - Single-camera capture (phone video)
-- Automated reconstruction pipeline via RealityScan SfM
-- Real-time browser-based visualization via Lichtfeld + Three.js
+- Automated reconstruction via COLMAP SfM
+- Real-time browser-based visualization via Three.js
 
 The goal is to make 3D scene capture as simple as recording a video.
 
@@ -57,21 +57,17 @@ The goal is to make 3D scene capture as simple as recording a video.
 
 ## How Gaussian Splatting Actually Works
 
-**Gaussian Splat training is not like a normal machine learning model.** A conventional ML model trains once and runs inference on any new input. Gaussian Splatting works differently — the trained model *is* the scene. It overfits intentionally to one specific capture.
+**Gaussian Splat training is not like a normal ML model.** A conventional ML model
+trains once and runs inference on any new input. Gaussian Splatting works differently —
+the trained model *is* the scene. It overfits intentionally to one specific capture.
 
 ```
-Video A  →  RealityScan  →  Lichtfeld train  →  scene_A.splat   (only represents scene A)
-Video B  →  RealityScan  →  Lichtfeld train  →  scene_B.splat   (only represents scene B)
+Video A  →  COLMAP  →  PyTorch train  →  scene_A.splat   (only represents scene A)
+Video B  →  COLMAP  →  PyTorch train  →  scene_B.splat   (only represents scene B)
 ```
 
-There is no shared weights file that generalizes to new scenes. Every new video requires a new training run. This is fundamental to the technology, not a limitation of this codebase.
-
-From the user's perspective:
-```
-Upload video  →  "Processing…"  →  View 3D scene
-```
-
-The RealityScan alignment and Lichtfeld training happen invisibly in the background.
+There is no shared weights file that generalizes to new scenes. Every new video requires
+a new training run. This is fundamental to the technology, not a limitation of this codebase.
 
 ---
 
@@ -84,289 +80,59 @@ The RealityScan alignment and Lichtfeld training happen invisibly in the backgro
 └───────────────────────────┬─────────────────────────────────┘
                             │ HTTP
 ┌───────────────────────────▼─────────────────────────────────┐
-│            FastAPI Backend  (server.py)                     │
+│            FastAPI Backend  (src/pipeline/server.py)        │
 │  - Receives video upload                                    │
-│  - Creates job in ModelRegistry (registry.json)             │
+│  - Creates job in ModelRegistry (models/registry.json)      │
 │  - Returns job_id, streams live status via SSE              │
 │  - Serves .splat files for browser viewing                  │
-│  - Runs frame extraction (FFmpeg) locally (CPU)             │
+│  - Runs frame extraction (FFmpeg) locally                   │
 └───────────────────────────┬─────────────────────────────────┘
                             │ Job handoff
 ┌───────────────────────────▼─────────────────────────────────┐
-│         RealityScan  (SfM Alignment — CPU/local)            │
+│         COLMAP  (SfM Alignment — CPU/local)                 │
 │  - Reads extracted frames                                   │
+│  - Detects SIFT keypoints, matches sequentially             │
 │  - Estimates real camera positions and orientations         │
 │  - Exports cameras.txt, images.txt, points3D.txt            │
-│  - Geometry-based, works on real captured video             │
 └───────────────────────────┬─────────────────────────────────┘
                             │ Pose handoff
 ┌───────────────────────────▼─────────────────────────────────┐
-│         Lichtfeld GPU Worker  (Colab / Runpod / Lambda)     │
-│  - Reads RealityScan poses + frames                         │
+│         PyTorch GPU Worker  (Colab / local CUDA GPU)        │
+│  - Reads COLMAP poses + frames                              │
 │  - Runs Gaussian Splat training (GPU, 20–40 min)            │
 │  - Exports .ply + .splat                                    │
-│  - Returns output to local machine                          │
 └───────────────────────────┬─────────────────────────────────┘
                             │
 ┌───────────────────────────▼─────────────────────────────────┐
-│         Storage  (local models/gaussian/ or cloud)          │
-│  - Stores .splat files per job                              │
+│         Storage  (models/registry.json + work/ directory)   │
+│  - Stores .splat and .ply files per job                     │
 │  - Served by FastAPI viewer endpoint                        │
 └─────────────────────────────────────────────────────────────┘
 ```
 
 ### What Runs Where
 
-| Stage | Tool | Runs On | Why |
-|---|---|---|---|
-| Frame extraction | FFmpeg | PyCharm / local | Fast, CPU is fine, ~30 sec |
-| SfM pose estimation | RealityScan | PyCharm / local | One-time per scene, CPU works, 5–15 min |
-| Gaussian Splat training | Lichtfeld | Colab T4 GPU | GPU required — 20–40 min on GPU |
-| FastAPI server + viewer | FastAPI + Three.js | PyCharm / local | Serves files, no GPU needed |
+| Stage | Tool | Runs On | Notes |
+|-------|------|---------|-------|
+| Frame extraction | FFmpeg | Local | ~30 sec, CPU is fine |
+| SfM pose estimation | COLMAP | Local | ~5–15 min, GPU-accelerated SIFT |
+| Gaussian Splat training | PyTorch | Colab T4 / local CUDA GPU | GPU required, 20–40 min |
+| FastAPI server + viewer | FastAPI + Three.js | Local | Serves files, no GPU needed |
 
 ### Recommended Developer Workflow
 
 ```
-1.  Record phone video
-2.  Start server locally (PyCharm) → upload via browser portal
+1.  Record phone video (35–45 sec, slow orbit, locked exposure)
+2.  Start server locally → upload via browser at http://localhost:8000
 3.  Server auto-runs frame extraction (FFmpeg, ~30 sec)
-4.  RealityScan alignment runs locally (CPU, ~5–15 min)
-5.  Upload project zip to Colab
-6.  Lichtfeld trains on Colab T4 GPU (~30 min)
-7.  Download .splat back to local machine
-8.  Place .splat in models/gaussian/
-9.  Server serves it at http://localhost:8000/viewer/<job_id>
-10. Build downstream products using the .splat file
+4.  COLMAP alignment runs locally (~5–15 min)
+5.  Status changes to "ready_for_colab" in the UI
+6a. Option A — Local GPU: click "Start Local GPU Training" in the UI
+6b. Option B — Google Colab: zip the job, upload to Colab notebook
+7.  Training completes → .splat and .ply written to work/<job_id>/models/gaussian/
+8.  Update models/registry.json, restart server
+9.  View at http://localhost:8000/viewer/<job_id>
 ```
-
----
-
-## Deployment Modes
-
-### 1. Local Developer Mode (Current)
-- Runs entirely on local machine (PyCharm)
-- FFmpeg + RealityScan run locally; Lichtfeld runs on Colab
-- Ideal for development, debugging, and research
-
-### 2. Web Application Mode (Target)
-- Fully automated pipeline
-- No developer interaction required
-- Real-time job tracking via web UI
-
-### 3. Distributed System Mode (Production)
-- Local server → job queue → cloud GPU workers → return .splat
-- CPU stages run locally (FFmpeg + RealityScan)
-- Lichtfeld training runs on cloud (Colab / Runpod / Lambda Labs)
-- Scalable multi-user system with job scheduling
-
----
-
-## Design Decisions
-
-### Why RealityScan for SfM?
-RealityScan provides geometry-based camera pose estimation using real captured video — no neural approximation. It produces accurate real camera positions and orientations that Lichtfeld's training loop requires for correct scene alignment.
-
-### Why Lichtfeld for Training?
-Lichtfeld is a GPU-accelerated Gaussian Splat training framework that produces high-quality `.ply` and `.splat` outputs optimized for real-time browser rendering. It integrates cleanly with RealityScan's pose output format.
-
-### Why FFmpeg for Frame Extraction?
-FFmpeg is significantly faster and more stable for video decoding and frame extraction, especially for longer videos and varied codecs (H.264, H.265, ProRes, etc.). No OpenCV dependency.
-
-### Why Browser-Based Viewer?
-A Three.js-based viewer allows zero installation, cross-platform access, and easy sharing.
-
-### Why CPU Mode for Alignment by Default?
-RealityScan's SfM pipeline works reliably on CPU for ≤200 frames and completes in 5–15 minutes — acceptable for a per-scene one-time cost. GPU acceleration is available for Colab environments.
-
----
-
-## Design Decision: Software vs Hardware
-
-### Approach Used
-
-MonoSplat adopts a software-driven pipeline using single-camera RGB input (standard phone video):
-- **FFmpeg** for frame extraction
-- **RealityScan** for Structure-from-Motion (geometry-based, real camera poses)
-- **Lichtfeld** for GPU Gaussian Splat training
-- **Three.js** for browser rendering
-
-### Why Not Use Hardware?
-
-| Limitation | Impact |
-|-----------|--------|
-| High cost | Limits accessibility and scalability |
-| Complex setup | Requires calibration and synchronization |
-| Reduced portability | Not suitable for casual or mobile capture |
-| Overkill for visual tasks | Unnecessary for photorealistic rendering |
-
-### Trade-off Analysis
-
-| Aspect | Software Pipeline (FFmpeg + RealityScan + Lichtfeld) | Hardware-Based Pipeline |
-|--------|------------------------------------------------------|------------------------|
-| Cost | Low (free tools) | High |
-| Ease of Use | Simple | Complex |
-| Accuracy | Moderate–High | Very High |
-| Realism | High | High |
-| Flexibility | High | Limited |
-
----
-
-## ⚠️ Important: Input Data Requirements (Read Before Running)
-
-This pipeline is **data-sensitive**. Most failures are caused by incorrect input videos — not code issues.
-
-### What Works ✅
-
-MonoSplat relies on geometry-based Structure-from-Motion (SfM) via RealityScan.
-For successful reconstruction, your input video must contain:
-
-- Real-world scenes (not animations)
-- Consistent camera motion around the subject
-- High texture (edges, patterns, details)
-- Strong frame-to-frame overlap (60–80%)
-
-Examples of good input:
-- Walking around an object (shoe, bottle, statue)
-- Drone orbit around a building
-- Handheld scan of a person or room
-
----
-
-### What Fails ❌
-
-The following will almost always fail during SfM alignment:
-
-- Logo animations or motion graphics
-- 2D content / screen recordings
-- Videos with cuts, fades, or transitions
-- Smooth or textureless objects
-- Fast motion causing motion blur
-
-These fail because SfM cannot find enough consistent feature matches between frames.
-
----
-
-### Why This Matters
-
-Gaussian Splatting is **not a general ML model**.
-
-```
-Video → SfM (camera poses) → Gaussian Training → Scene-specific model
-```
-
-- The model is trained per scene
-- It requires accurate camera poses
-- If SfM fails → training will fail
-
----
-
-### Common Error Symptoms
-
-| Error | Cause |
-|-------|-------|
-| "Could not register image" | Poor feature overlap |
-| "Discarding reconstruction" | Not enough valid frames |
-| Sparse / broken model | Textureless or inconsistent input |
-
----
-
-### Key Insight
-
-> ✔ Good data + simple pipeline = SUCCESS
-> ❌ Bad data + perfect pipeline = FAILURE
-
----
-
-### Alternative (Advanced)
-
-If working with synthetic or rendered content (e.g., Blender):
-
-- SfM-based pipeline will not work
-- You must use known camera poses instead
-
----
-
-This is the #1 reason Gaussian Splat pipelines fail — choosing the wrong input.
-
----
-
-## Capture Guide
-
-This is the most critical section. The pipeline's SfM stage (COLMAP) relies entirely on finding consistent visual features across frames. Bad input video = failed reconstruction, regardless of how the code is configured.
-
----
-
-### What Kind of Video Is Accepted
-
-Your video must be:
-
-- **Real-world footage** — not animation, screen recording, CGI, or motion graphics
-- **Shot with a single fixed camera** — phone camera is perfect
-- **Well-lit with consistent exposure** — no auto-exposure flickering between frames
-- **One continuous uninterrupted shot** — no cuts, fades, or scene changes
-- **Slow and steady movement** — fast motion causes blur which destroys SIFT features
-- **Textured subject** — the scene must have visible edges, patterns, and surface detail
-
-Things that will always fail: plain white walls, shiny metallic spheres, glass objects, TV screens, logos, smooth or textureless surfaces. These fail because COLMAP cannot find enough consistent feature matches between frames.
-
----
-
-### At What Angle It Should Be Recorded
-
-The golden rule is **60–80% overlap between consecutive frames**. COLMAP needs to see the subject from many overlapping angles to triangulate 3D points.
-
-**For an object (shoe, bottle, plant, statue):**
-- Walk in a slow complete circle around it
-- Keep the object centered in frame the entire time
-- Do at least 2 full loops — one at eye level, one slightly above
-- Maintain consistent distance — do not zoom in or out
-
-**For a room or indoor space:**
-- Walk slowly around the perimeter facing inward
-- Overlap every position with the previous one
-- Avoid pointing directly at windows — overexposure destroys features
-
-**For architecture or building exterior:**
-- Walk parallel to the facade at a consistent distance
-- Arc around corners slowly
-- Do not back away suddenly or change elevation abruptly
-
-**Angles that will fail:**
-- Straight-on flat shot of a wall — no parallax, COLMAP cannot triangulate
-- Top-down directly overhead — poor for SfM
-- Random handheld walking with the camera swinging — too much blur and jump cuts
-
----
-
-### Practical Phone Recording Tips
-
-Since the pipeline extracts 200 frames at 5 fps, a **40-second video gives exactly 200 frames** — the ideal target length.
-
-| Parameter | Recommendation |
-|-----------|---------------|
-| Duration | 35–45 seconds (≈ 200 frames at 5 fps) |
-| Motion | Slow, smooth arc — roughly one step per second |
-| Frame overlap | 60–80% between consecutive frames |
-| Lighting | Consistent, diffuse — avoid hard shadows |
-| Exposure | Lock exposure before recording (tap-hold on iPhone, Pro mode on Android) |
-| Resolution | 1080p minimum |
-| Subject framing | Fill 60–70% of the frame |
-
-**Before you record:** tap and hold on your subject to lock focus and exposure. This prevents the camera from adjusting brightness mid-shot, which would cause inconsistent frame colors and confuse COLMAP's feature matching.
-
----
-
-### Common Mistakes
-
-| Mistake | Consequence | Fix |
-|---------|-------------|-----|
-| Moving too fast | Motion blur, failed alignment | Walk at one step per second |
-| Not enough angles | Holes in geometry, incomplete model | Two full loops minimum |
-| Changing exposure | Inconsistent colors between frames | Lock exposure before recording |
-| Background clutter | Noisy, unstable reconstruction | Use simple, static background |
-| Subject too small in frame | Poor feature density, low detail | Fill 60–70% of frame |
-| Textureless subject | No SIFT features to match | Choose subjects with visible surface detail |
-| Video with cuts or fades | COLMAP cannot bridge the jump | Use one continuous uninterrupted clip |
 
 ---
 
@@ -375,29 +141,276 @@ Since the pipeline extracts 200 frames at 5 fps, a **40-second video gives exact
 ### Prerequisites
 
 ```bash
+# Python dependencies
+pip install -r requirements.txt
+
+# PyTorch with CUDA support (required for GPU training)
+# The default pip install of torch is CPU-only — you need the CUDA build:
+pip uninstall torch torchvision torchaudio -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Verify CUDA is working
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+# Should print: True + your GPU name
+
 # FFmpeg (required for frame extraction)
 # Ubuntu:  sudo apt install ffmpeg
 # macOS:   brew install ffmpeg
 # Windows: https://ffmpeg.org/download.html
+#          or via conda: conda install -c conda-forge ffmpeg
 
 # COLMAP (required for SfM pose estimation)
 # Ubuntu:  sudo apt install colmap
 # macOS:   brew install colmap
 # Windows: https://github.com/colmap/colmap/releases
-
-# Python dependencies
-pip install -r requirements.txt
+#          or via conda: conda install -c conda-forge colmap
 ```
+
+### Verify Tool Versions
+
+```powershell
+# Windows PowerShell
+colmap help 2>&1 | Select-Object -First 3      # should show COLMAP 3.8+
+ffmpeg -version 2>&1 | Select-Object -First 1  # should show ffmpeg version 4.x+
+```
+
+```bash
+# Linux / macOS
+colmap --version    # 3.8+
+ffmpeg -version     # 4.x+
+```
+
+Verified working versions: **COLMAP 3.13.0** (with CUDA), **FFmpeg 8.1**
 
 ### Quick Start
 
 ```bash
-# Start the local server
 uvicorn src.pipeline.server:app --reload --port 8000
-
 # Open browser → http://localhost:8000
 # Upload your video → pipeline runs automatically
 ```
+
+---
+
+## GPU Training
+
+### Option A — Local GPU
+
+After COLMAP finishes the UI shows a "Start Local GPU Training" button (for jobs in
+`ready_for_colab` status). Clicking it calls `POST /api/train-local/<job_id>` which
+launches:
+
+```bash
+python scripts/train_local_gpu.py --job_id 
+```
+
+You can also run it directly:
+
+```bash
+python scripts/train_local_gpu.py --job_id 
+
+# Override profile settings if needed
+python scripts/train_local_gpu.py --job_id  \
+    --iterations 10000 --max_gaussians 100000 --sh_degree 2
+
+# Resume from checkpoint
+python scripts/train_local_gpu.py --job_id  \
+    --resume work//models/checkpoints/checkpoint_005000.pkl
+
+# Render a preview image after training
+python scripts/train_local_gpu.py --job_id  --preview
+```
+
+The script auto-detects your GPU VRAM and picks a training profile:
+
+| VRAM | GPU Examples | Iterations | Gaussians | Resolution | Est. Time* |
+|------|-------------|------------|-----------|------------|-----------|
+| ≥ 20 GB | RTX 3090, 4090, A100 | 30,000 | 500,000 | 960×540 | ~20 min |
+| ≥ 8 GB | RTX 3070, 3080, 4070 | 15,000 | 200,000 | 800×450 | ~30 min |
+| ≥ 4 GB | RTX 3060, 2060, GTX 1650 | 7,000 | 80,000 | 640×360 | ~15–20 min |
+| < 4 GB / CPU | Fallback | 1,000 | 10,000 | 480×270 | Very slow |
+
+*With `diff-gaussian-rasterization` installed. Without it, the 4 GB tier takes 3–4 hours.
+
+### Option B — Google Colab (Recommended for most setups)
+
+Unless you have an RTX 3080+ with the CUDA rasterizer installed, Colab is the better
+choice. You get a T4 (16 GB) or A100 (40 GB) for free with no setup.
+
+| Factor | Local GTX 1650 | Google Colab (T4/A100) |
+|--------|---------------|------------------------|
+| Training time (no rasterizer) | 3–4 hours | 10–20 minutes |
+| Training time (with rasterizer) | 15–20 min | 10–20 minutes |
+| Setup required | CUDA toolkit, Build Tools, compiler | None |
+| VRAM | 4 GB | 16 GB (T4) / 40 GB (A100) |
+| Cost | Free (your electricity) | Free tier available |
+
+**How to use Colab:**
+
+1. Zip the job folder:
+   ```bash
+   python scripts/zip_for_colab.py <job_id>
+   ```
+2. Upload the zip to `notebooks/monosplat_colab_gpu.ipynb` and run all cells
+3. Download the output and place files in `work/<job_id>/models/gaussian/`
+4. Update `models/registry.json` and restart the server (see below)
+
+---
+
+## diff-gaussian-rasterization (Optional CUDA Rasterizer)
+
+This C++ CUDA extension speeds up rendering ~100× and is the difference between
+3–4 hours and 15–20 minutes on a GTX 1650.
+
+**Requirements before installing:**
+- Visual Studio Build Tools with "Desktop development with C++"
+  Download: `https://aka.ms/vs/17/release/vs_BuildTools.exe`
+- CUDA Toolkit 12.1 — Download: `https://developer.nvidia.com/cuda-toolkit`
+- `CUDA_HOME` environment variable set
+
+**Windows (PowerShell):**
+```powershell
+$env:CUDA_HOME = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"
+$env:PATH += ";$env:CUDA_HOME\bin"
+
+cd D:\PycharmProjects
+git clone --recurse-submodules https://github.com/graphdeco-inria/diff-gaussian-rasterization
+cd diff-gaussian-rasterization
+python setup.py install
+```
+
+**Linux / macOS:**
+```bash
+git clone --recurse-submodules https://github.com/graphdeco-inria/diff-gaussian-rasterization
+pip install ./diff-gaussian-rasterization
+```
+
+If `CUDA_HOME` is not set, find your CUDA install:
+```powershell
+# Windows — find nvcc.exe
+Get-ChildItem "C:\","D:\" -Recurse -Filter "nvcc.exe" -ErrorAction SilentlyContinue | Select-Object FullName
+```
+
+---
+
+## Updating the Registry After Training
+
+The server loads `models/registry.json` **once on startup** into memory. Edits to the
+file while the server is running are ignored. You must stop the server, edit the file,
+then restart.
+
+**Correct workflow:**
+
+```powershell
+# 1. Stop the server (Ctrl+C in the terminal running uvicorn, or:)
+Get-Process python | Stop-Process
+
+# 2. Edit models/registry.json
+#    Set status → "ready", fill in ply_path and splat_path
+
+# 3. Restart
+uvicorn src.pipeline.server:app --reload --port 8000
+
+# 4. Verify
+Invoke-RestMethod http://localhost:8000/api/jobs
+```
+
+**Example registry entry after successful training:**
+
+```json
+"f0bdec2a7e62": {
+  "job_id": "f0bdec2a7e62",
+  "item_name": "vase",
+  "status": "ready",
+  "progress": 100,
+  "message": "Training complete. Model ready to view.",
+  "ply_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.ply",
+  "splat_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.splat",
+  "num_images": 124,
+  "num_gaussians": 10000,
+  "error": null
+}
+```
+
+> **Note:** Use full absolute paths for `ply_path` and `splat_path` on Windows.
+> The output files are always written to `work/<job_id>/models/gaussian/`.
+
+---
+
+## ⚠️ Input Data Requirements
+
+This pipeline is **data-sensitive**. Most failures are caused by incorrect input videos,
+not code issues.
+
+### What Works ✅
+
+- Real-world footage shot with a phone camera
+- Slow complete orbit around the subject (60–80% frame overlap)
+- Consistent exposure and lighting throughout
+- One continuous uninterrupted clip
+- Textured subjects (edges, patterns, surface detail)
+
+Good examples: shoe, bottle, plant, statue, room, building exterior
+
+### What Fails ❌
+
+- Logo animations, motion graphics, screen recordings
+- Videos with cuts, fades, or transitions
+- Smooth, shiny, or transparent objects (plain walls, glass, metal spheres)
+- Fast motion causing motion blur
+- 2D content or rendered CGI
+
+These fail because COLMAP cannot find consistent feature matches between frames.
+
+### Common Error Symptoms
+
+| Error | Cause | Fix |
+|-------|-------|-----|
+| "Could not register image" | Poor frame overlap | Walk slower, two full loops |
+| "Discarding reconstruction" | Not enough valid frames | More angles, better lighting |
+| Sparse / broken model | Textureless or inconsistent input | Change subject or environment |
+
+---
+
+## Capture Guide
+
+### Recording Tips
+
+| Parameter | Recommendation |
+|-----------|---------------|
+| Duration | 35–45 seconds (~200 frames at 5 fps) |
+| Motion | Slow smooth arc — one step per second |
+| Frame overlap | 60–80% between consecutive frames |
+| Lighting | Consistent, diffuse — avoid hard shadows |
+| Exposure | Lock before recording (tap-hold on iPhone, Pro mode on Android) |
+| Resolution | 1080p minimum |
+| Subject framing | Fill 60–70% of the frame |
+
+### Angle Guidelines
+
+**For an object (shoe, bottle, plant):**
+- Slow complete circle at eye level
+- Second loop slightly above
+- Keep object centered and maintain consistent distance
+
+**For a room or indoor space:**
+- Walk slowly around the perimeter facing inward
+- Avoid pointing at windows (overexposure)
+
+**For architecture:**
+- Walk parallel to the facade at consistent distance
+- Arc around corners slowly
+
+### Common Mistakes
+
+| Mistake | Consequence | Fix |
+|---------|-------------|-----|
+| Moving too fast | Motion blur, failed alignment | One step per second |
+| Not enough angles | Holes in geometry | Two full loops minimum |
+| Changing exposure | Inconsistent colors | Lock exposure before recording |
+| Subject too small | Low feature density | Fill 60–70% of frame |
+| Textureless subject | No SIFT features to match | Choose textured subjects |
+| Video with cuts | COLMAP cannot bridge the jump | One continuous clip only |
 
 ---
 
@@ -409,11 +422,9 @@ uvicorn src.pipeline.server:app --reload --port 8000
 Video (MP4/MOV) → FFmpeg → work/<job_id>/frames/*.png
 ```
 
-- Extracts frames at 5 fps (configurable)
-- Hard cap at 200 frames for tractable COLMAP alignment
-- Validates every extracted frame — corrupted files are removed before COLMAP runs
-
----
+- Adaptive fps based on video duration (configurable, default null = auto)
+- Hard cap at 600 frames (config default)
+- Validates every extracted frame — corrupted files removed before COLMAP runs
 
 ### Stage 2 — Camera Pose Estimation (COLMAP SfM)
 
@@ -424,26 +435,24 @@ Frames → COLMAP → work/<job_id>/colmap/sparse_text/
                       └── points3D.txt     # sparse 3D point cloud
 ```
 
-- Detects SIFT keypoints in every frame (GPU-accelerated)
-- Matches features sequentially across adjacent frames (overlap=10)
-- Triangulates 3D points and estimates real camera positions and orientations via Structure-from-Motion
+- GPU-accelerated SIFT keypoint detection
+- Sequential matching with overlap=10 (much lighter than exhaustive)
+- Triangulates 3D points and estimates real camera positions via Structure-from-Motion
 - Exports text-format sparse model for use in Gaussian training
-
----
 
 ### Stage 3 — Gaussian Splat Training (PyTorch — GPU required)
 
 ```
-Frames + Camera Poses → GaussianTrainer (Colab T4 GPU)
+Frames + Camera Poses → GaussianTrainer
                               → work/<job_id>/models/gaussian/<job_id>.ply
                               → work/<job_id>/models/gaussian/<job_id>.splat
 ```
 
-- On desktop (CPU): pipeline stops here with `ready_for_colab` status — zip the work folder and upload to Colab
-- On Colab (GPU): initializes Gaussians from the COLMAP sparse point cloud, trains using L1 + SSIM photometric loss, densifies (clone/split) and prunes Gaussians throughout training
-- Exports `.ply` (archive format) and `.splat` (browser-optimized binary, 32 bytes per splat)
-
----
+- Initializes Gaussians from the COLMAP sparse point cloud
+- Trains using L1 + SSIM photometric loss (lambda_dssim=0.2)
+- Densifies (clone/split) and prunes Gaussians on a schedule
+- Saves checkpoints every 5,000 iterations for resume support
+- Exports `.ply` (archive) and `.splat` (browser-optimized, 32 bytes per splat)
 
 ### Stage 4 — Browser Viewer (Three.js)
 
@@ -451,22 +460,12 @@ Frames + Camera Poses → GaussianTrainer (Colab T4 GPU)
 <job_id>.splat → FastAPI → /viewer/<job_id> → Three.js real-time render
 ```
 
-| Input | Action |
-|-------|--------|
-| Left mouse drag | Rotate |
-| Right mouse drag | Pan |
-| Scroll wheel | Zoom |
+| Control | Action |
+|---------|--------|
+| Left drag | Rotate |
+| Right drag | Pan |
+| Scroll | Zoom |
 | R | Reset camera |
-
----
-
-## Output Formats
-
-### .ply (standard Gaussian Splat)
-Compatible with SuperSplat, SIBR, Luma AI. Contains positions, SH colors, opacity, scale, rotation per Gaussian. Use for archiving, further processing, desktop apps.
-
-### .splat (browser-optimized binary)
-32 bytes per splat. Direct drag-and-drop into https://supersplat.playcanvas.com. Served by the built-in Three.js viewer at `/viewer/<job_id>`. Use for browser viewing, sharing, demos.
 
 ---
 
@@ -476,192 +475,101 @@ All parameters in `config/config.yaml`:
 
 ```yaml
 data:
-  video_fps: 5           # Frames extracted per second
-  max_frames: 200        # Hard cap on extracted frames
+  video_fps: null        # null = adaptive (duration-based); set a number to override
+  max_frames: 600        # hard cap on extracted frames
 
 colmap:
-  binary_path: "colmap"       # CLI executable name
-  quality: "medium"           # low / medium / high
+  binary_path: "colmap"
+  quality: "medium"      # low / medium / high
   camera_model: "OPENCV"
   single_camera: true
 
 training:
-  output_dir: "models/gaussian"
-  checkpoint_dir: "models/checkpoints"
   iterations: 30000
   save_every: 5000
   densify_from_iter: 500
   densify_until_iter: 15000
+  densification_interval: 100
+  densify_grad_threshold: 0.0002
+  lambda_dssim: 0.2
 
 renderer:
-  max_gaussians: 3000000
+  background_color: [1.0, 1.0, 1.0]
   sh_degree: 3
+  max_gaussians: 1000000
+  use_cuda_rasterizer: true
+  batch_size: 5000
 ```
+
 ---
- 
-## What Local GPU Training Does
- 
-After COLMAP finishes, MonoSplat needs a GPU to run **3D Gaussian Splatting (3DGS)**
-training — this is the step that turns the COLMAP point cloud into a viewable `.splat`
-and `.ply` file.
- 
-The training script is:
-```
-scripts/train_local_gpu.py
-```
- 
-Run it like this:
-```bash
-python scripts/train_local_gpu.py --job_id <job_id>
-```
- 
+
+## Output Formats
+
+### .ply (standard Gaussian Splat archive)
+Contains positions, SH colors, opacity, scale, rotation per Gaussian.
+Compatible with SuperSplat, SIBR viewers, Luma AI.
+Use for archiving, further processing, desktop apps.
+
+### .splat (browser-optimized binary)
+32 bytes per splat. Direct drag-and-drop into https://supersplat.playcanvas.com.
+Served by the built-in Three.js viewer at `/viewer/<job_id>`.
+Use for browser viewing, sharing, and demos.
+
 ---
- 
-## What You Need for Local Training
- 
-### 1. CUDA-capable NVIDIA GPU
-Your GPU must support CUDA. The script auto-detects VRAM and picks a profile:
- 
-| VRAM | GPU Examples | Iterations | Gaussians | Resolution | Est. Time |
-|------|-------------|------------|-----------|------------|-----------|
-| ≥ 20 GB | RTX 3090, 4090, A100 | 30,000 | 500,000 | 960×540 | ~20 min |
-| ≥ 8 GB | RTX 3070, 3080, 4070 | 15,000 | 200,000 | 800×450 | ~30 min |
-| ≥ 4 GB | RTX 3060, 2060, GTX 1650 | 7,000 | 80,000 | 640×360 | ~3–4 hrs* |
-| < 4 GB / CPU | Fallback | 1,000 | 10,000 | 480×270 | Very slow |
- 
-*Without the CUDA rasterizer. With it: ~15–20 min.
- 
-### 2. PyTorch with CUDA Support
-The standard PyTorch install is CPU-only. You need the CUDA build:
- 
+
+## Known Issues and Fixes
+
+### OOM crash during KNN initialization (GTX 1650 / 4 GB VRAM)
+**Symptom:**
+```
+RuntimeError: DefaultCPUAllocator: not enough memory: you tried to allocate 25600000000 bytes
+```
+**Cause:** The original `_knn_mean_dist` computed a full 80,000×80,000 distance matrix
+(25 GB) on CPU.
+
+**Fix (applied in `scripts/train_local_gpu.py`):** Batched GPU kNN — processes 2,048
+rows at a time (~640 MB peak), runs on CUDA instead of CPU:
+```python
+for start in range(0, N, 2048):
+    chunk = pts[start:end]
+    D = torch.cdist(chunk, pts)   # only 2048 rows at once
+    ...
+```
+
+### CUDA not detected despite NVIDIA GPU being present
+**Symptom:** `⚠ CUDA not available — running on CPU`
+
+**Cause:** PyTorch was installed without CUDA support (the default `pip install torch`).
+
+**Fix:**
 ```bash
 pip uninstall torch torchvision torchaudio -y
 pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 ```
- 
-Verify it worked:
-```bash
-python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
-# Should print: True
-#               NVIDIA GeForce GTX 1650 (or your GPU)
-```
- 
-### 3. diff-gaussian-rasterization (Optional but Important)
-This is a C++ CUDA extension that speeds up rendering **~100×**.
-Without it a software renderer is used and training takes hours instead of minutes.
- 
-To install it you need:
-- **Visual Studio Build Tools** with "Desktop development with C++" workload
-  - Download from: `https://aka.ms/vs/17/release/vs_BuildTools.exe`
-- **CUDA Toolkit** matching your PyTorch CUDA version (12.1 recommended)
-  - Download from: `https://developer.nvidia.com/cuda-toolkit`
-- The `CUDA_HOME` environment variable pointing to your CUDA install
-Once those are set up:
-```bash
-cd D:\PycharmProjects
-git clone --recurse-submodules https://github.com/graphdeco-inria/diff-gaussian-rasterization
-cd diff-gaussian-rasterization
-python setup.py install
-```
- 
-### 4. COLMAP and FFmpeg
-Both must be installed and on your PATH.
- 
-| Tool | Required Version | Recommended |
-|------|-----------------|-------------|
-| COLMAP | 3.8+ | 3.13 ✓ |
-| FFmpeg | 4.x+ | 8.x ✓ |
- 
-Install via conda if missing:
-```bash
-conda install -c conda-forge colmap ffmpeg
-```
- 
----
- 
-## Known Issues on GTX 1650 (4 GB VRAM)
- 
-### OOM during KNN initialization
-The original script computed an 80,000×80,000 distance matrix requiring ~25 GB RAM.
-This is fixed in the patched `train_local_gpu.py` — it uses a batched approach
-that processes 2,048 rows at a time (~640 MB peak).
- 
-### CUDA not detected despite having an NVIDIA GPU
-This means PyTorch was installed without CUDA support (the default pip install).
-Fix: reinstall with the `--index-url https://download.pytorch.org/whl/cu121` flag above.
- 
-### CUDA_HOME not set
-The rasterizer build needs to find your CUDA install:
+Note: cu121 wheels work with CUDA drivers 12.1–12.5+ (forward compatible).
+
+### CUDA_HOME not set (rasterizer build fails)
+**Symptom:** `OSError: CUDA_HOME environment variable is not set`
+
+**Fix (Windows PowerShell):**
 ```powershell
 $env:CUDA_HOME = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"
 $env:PATH += ";$env:CUDA_HOME\bin"
+python setup.py install
 ```
- 
----
- 
-## Why Google Colab is Better for Most People
- 
-Unless you have a high-end GPU (RTX 3080+) and the rasterizer installed,
-**Colab is the better choice**. Here's why:
- 
-| Factor | Local GTX 1650 | Google Colab (T4/A100) |
-|--------|---------------|------------------------|
-| Training time | 3–4 hours (no rasterizer) | 10–20 minutes |
-| Setup required | CUDA toolkit, Build Tools, compiler | None |
-| Cost | Free (your hardware) | Free tier available |
-| VRAM | 4 GB | 16 GB (T4) / 40 GB (A100) |
-| Quality | Limited by VRAM | Full quality |
-| Reliability | Depends on your setup | Consistent |
- 
-### How to use Colab
- 
-When your job reaches `ready_for_colab` status in the UI:
- 
-1. Zip the job folder:
-   ```bash
-   python scripts/zip_for_colab.py <job_id>
-   ```
- 
-2. Upload the zip to the Colab notebook:
-   ```
-   notebooks/monosplat_colab_gpu.ipynb
-   ```
- 
-3. Run all cells. After training finishes, download the output and place the files in:
-   ```
-   work/<job_id>/models/gaussian/
-   ```
- 
-4. Update `models/registry.json` with the job's new status and file paths,
-   then restart the server to pick up the changes.
----
- 
-## Updating the Registry After Training
- 
-The server loads `models/registry.json` once on startup into memory.
-Edits to the file are only picked up on restart.
- 
-**Correct workflow:**
-1. Stop the server
-2. Edit `models/registry.json` — set `status` to `ready`, fill in `ply_path` and `splat_path`
-3. Restart the server
-Example entry after successful training:
-```json
-"f0bdec2a7e62": {
-  "status": "ready",
-  "progress": 100,
-  "message": "Training complete. Model ready to view.",
-  "ply_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.ply",
-  "splat_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.splat",
-  "num_gaussians": 10000
-}
+
+### loss.backward() crash — no grad_fn
+**Symptom:**
 ```
- 
-Then verify the API is returning the updated data:
-```powershell
-Invoke-RestMethod http://localhost:8000/api/jobs
+RuntimeError: element 0 of tensors does not require grad and does not have a grad_fn
 ```
- 
+**Cause:** Software renderer returns a tensor with no gradient graph.
+Downstream effect of CUDA not being available.
+**Fix:** Fix the CUDA/PyTorch install first (see above).
+
+### Registry edits not picked up by the UI
+**Cause:** The server loads `models/registry.json` once at startup into memory.
+**Fix:** Stop the server, edit the file, restart.
 
 ---
 
@@ -671,44 +579,46 @@ Invoke-RestMethod http://localhost:8000/api/jobs
 |---------|-------------|-----|
 | FFmpeg not found | Not in PATH | Install FFmpeg and add to PATH |
 | COLMAP not found | Not installed | Install COLMAP and add to PATH |
-| COLMAP produces no model | Poor overlap or textureless input | Capture at 5 fps; walk two full loops |
-| Feature matching crash (exit 3221225786) | GPU VRAM exhaustion during exhaustive matching | Pipeline uses sequential_matcher by default — check colmap_runner.py |
-| Blurry reconstruction | Motion blur | Lock exposure; walk slower |
-| Training OOM on Colab | Too many Gaussians | Lower `max_gaussians` in config |
-| Colab times out | Long training | Checkpoints save every 5k iters — resume with `--resume` |
-| Browser viewer blank | .splat not ready | Wait for job to reach `ready` in portal |
+| COLMAP produces no model | Poor overlap or textureless input | Two full loops, locked exposure |
+| Feature matching crash (exit 3221225786) | GPU VRAM exhaustion during exhaustive matching | Pipeline uses sequential_matcher by default |
+| Blurry reconstruction | Motion blur | Lock exposure, walk slower |
+| Training OOM | Too many Gaussians | Lower `max_gaussians` in config or script args |
+| Colab times out | Long training run | Checkpoints every 5k iters — resume with `--resume` |
+| Browser viewer blank | .splat not ready or registry not updated | Wait for `ready` status; check registry.json |
+| UI shows `ready_for_colab` after training | Registry not updated / server not restarted | Stop server, edit registry.json, restart |
 | Upload portal unreachable | Server not running | Run uvicorn command, check port 8000 |
 
 ---
 
 ## Performance Targets
 
-| Metric | Target | Notes |
-|--------|--------|-------|
-| Frame extraction | ~30 sec | FFmpeg, up to 200 frames |
-| COLMAP feature extraction | ~1 min | GPU-accelerated SIFT, 200 frames |
-| COLMAP sequential matching | 1–3 min | overlap=10, far lighter than exhaustive |
+| Stage | Target Time | Notes |
+|-------|------------|-------|
+| Frame extraction | ~30 sec | FFmpeg, up to 600 frames |
+| COLMAP feature extraction | ~1 min | GPU-accelerated SIFT |
+| COLMAP sequential matching | 1–3 min | overlap=10 |
 | COLMAP sparse reconstruction | 2–5 min | Depends on scene complexity |
-| Gaussian training (T4 GPU) | 20–40 min | 15k–30k iterations on Colab |
-| Browser render FPS | 30+ FPS | Three.js viewer |
-| .splat file size | Under 500 MB | 3M splats ~96 MB |
+| Gaussian training — Colab T4 | 20–40 min | 15k–30k iterations |
+| Gaussian training — GTX 1650 (no rasterizer) | 3–4 hrs | 7k iterations, software renderer |
+| Gaussian training — GTX 1650 (with rasterizer) | 15–20 min | 7k iterations, CUDA rasterizer |
+| Browser render | 30+ FPS | Three.js viewer |
 
 ---
 
 ## Tech Stack
 
-| Component | Technology |
-|-----------|-----------|
-| Language | Python 3.9+ |
-| Deep Learning | PyTorch 2.0+ |
-| Frame Extraction | FFmpeg |
-| Pose Estimation (SfM) | COLMAP |
-| Gaussian Training | Custom PyTorch (GaussianTrainer) |
-| Cloud Training | Google Colab (T4 GPU) |
-| Web Server | FastAPI + Uvicorn |
-| Browser Viewer | Three.js (gaussian-splats-3d) |
-| 3D Model Formats | PLY + .splat binary |
-| Config | PyYAML |
+| Component | Technology | Version |
+|-----------|-----------|---------|
+| Language | Python | 3.9+ |
+| Deep Learning | PyTorch | 2.0+ (cu121 build) |
+| Frame Extraction | FFmpeg | 4.x+ (8.1 verified) |
+| Pose Estimation (SfM) | COLMAP | 3.8+ (3.13 verified) |
+| Gaussian Training | Custom PyTorch GaussianTrainer | — |
+| Cloud Training | Google Colab (T4 GPU) | — |
+| Web Server | FastAPI + Uvicorn | 0.104+ |
+| Browser Viewer | Three.js (gaussian-splats-3d) | — |
+| 3D Formats | PLY + .splat binary | — |
+| Config | PyYAML | 6.0+ |
 
 ---
 
@@ -719,100 +629,53 @@ Invoke-RestMethod http://localhost:8000/api/jobs
 | Property | NeRF | Gaussian Splatting |
 |----------|------|--------------------|
 | Scene representation | Implicit neural network | Explicit 3D Gaussian primitives |
-| Render speed | Seconds per frame | Real-time (20–60+ FPS) |
-| Training time | Hours | 15–30 minutes |
+| Render speed | Seconds per frame | Real-time (30–60+ FPS) |
+| Training time | Hours | 15–30 minutes (GPU) |
 | Editability | Difficult | Easy — Gaussians are explicit objects |
+| Browser support | Requires server-side rendering | Native Three.js, zero install |
 
-### SfM Tool Comparison
+### Why Not Use Hardware Depth Sensors?
 
-| Tool | Geometry-based | Real Camera Poses | Works on Video | Notes |
-|------|---------------|-------------------|----------------|-------|
-| **COLMAP** (used) | ✅ | ✅ | ✅ | Open source, battle-tested |
-| RealityCapture | ✅ | ✅ | ✅ | Commercial, pay-per-use |
-| NeRF-based pose estimation | ❌ | Approximated | ✅ | Neural, less accurate |
-
----
-
-## Why MonoSplat Is Better Than Other Pipelines
-
-Most Gaussian Splat pipelines make trade-offs that hurt accessibility, accuracy, or deployability. MonoSplat is designed to avoid all three.
-
-### vs. NeRF-based Pipelines (Instant-NGP, Nerfstudio)
-
-| Aspect | NeRF Pipelines | MonoSplat |
-|--------|---------------|-----------|
-| Render speed | Seconds per frame (offline) | Real-time 30+ FPS in browser |
-| Training time | 1–6 hours | 20–40 minutes (GPU) |
-| Scene representation | Implicit neural network | Explicit 3D Gaussians (editable) |
-| Browser support | Requires heavy server-side rendering | Native Three.js viewer, zero install |
-| Editability | Cannot edit scene geometry | Gaussians are explicit — can be pruned, filtered, exported |
-
-NeRF produces a neural function, not a scene you can interact with. MonoSplat produces an explicit `.splat` file you can open, share, and embed anywhere.
+| Limitation | Impact |
+|-----------|--------|
+| High cost | Limits accessibility |
+| Complex setup | Calibration and synchronization required |
+| Reduced portability | Not suitable for casual mobile capture |
+| Overkill for visual tasks | Unnecessary for photorealistic rendering |
 
 ---
 
-### vs. Photogrammetry-only Pipelines (Meshroom, Metashape)
+## Why MonoSplat vs Other Pipelines
 
-| Aspect | Photogrammetry Pipelines | MonoSplat |
-|--------|-------------------------|-----------|
-| Output | Dense mesh + texture | Real-time Gaussian Splat |
-| Render quality | Baked texture, flat lighting | View-dependent color, photorealistic |
-| Runtime viewer | Heavy desktop app required | Browser — no install |
-| Pipeline automation | Manual multi-step workflow | Single video upload → browser view |
-| Real-time FPS | Not real-time | 30+ FPS |
-
-Meshes require UV unwrapping, texture baking, and a rendering engine. MonoSplat skips all of that and renders directly in the browser at real-time speeds.
-
----
-
-### vs. Raw Gaussian Splat Implementations (3DGS reference code)
+### vs. Raw 3DGS Reference Code
 
 | Aspect | 3DGS Reference Code | MonoSplat |
 |--------|---------------------|-----------|
-| Usability | Research code, CLI-only | Full web upload portal + live job tracking |
-| Deployment | Local only | Local + Colab GPU + cloud-ready architecture |
-| COLMAP integration | Manual | Automated (sequential matching, zero manual steps) |
-| Viewer | SIBR desktop viewer | Three.js browser viewer, shareable URL |
-| Job management | None | Async job queue, SSE status streaming, registry |
+| Usability | Research CLI-only | Full web upload portal + live job tracking |
+| COLMAP integration | Manual | Automated sequential matching |
+| Viewer | SIBR desktop app | Three.js browser, shareable URL |
+| Job management | None | Async queue, SSE status, registry |
 
-The original 3DGS paper code requires expert setup. MonoSplat wraps the entire pipeline into a product: upload a video, get a shareable 3D scene.
-
----
-
-### vs. Luma AI / Polycam (Commercial Apps)
+### vs. Commercial Apps (Luma AI, Polycam)
 
 | Aspect | Commercial Apps | MonoSplat |
 |--------|----------------|-----------|
-| Cost | Subscription / per-scene fees | Free (open source) |
-| Control | Black box | Full source, customizable |
-| Privacy | Data uploaded to third party | Runs locally on your machine |
-| Extensibility | No | Plug in your own models, export formats, viewers |
-| Academic use | Not citable | Fully open, auditable, reproducible |
-
-Commercial tools are a black box. MonoSplat is fully open — every stage is inspectable, modifiable, and citable in academic work.
+| Cost | Subscription / per-scene | Free, open source |
+| Privacy | Data uploaded to third party | Runs locally |
+| Extensibility | Black box | Full source, customizable |
+| Academic use | Not citable | Open, auditable, reproducible |
 
 ---
 
-### Summary
-
-MonoSplat is the only pipeline that combines:
-- ✅ Geometry-based SfM (real camera poses, not neural approximations)
-- ✅ Real-time browser viewer (no desktop app, no install)
-- ✅ Automated end-to-end pipeline (video in → splat out)
-- ✅ CPU/GPU split architecture (local preprocessing, cloud training)
-- ✅ Fully open source and academically reproducible
-
----
-
-## Evaluation
+## Evaluation Metrics
 
 | Metric | Description |
 |--------|-------------|
-| PSNR | Image reconstruction quality |
-| SSIM | Structural similarity |
-| FPS | Viewer performance |
+| PSNR | Image reconstruction quality (higher = better) |
+| SSIM | Structural similarity (0–1, higher = better) |
+| FPS | Viewer render performance |
 | Training Time | End-to-end efficiency |
-| Completeness | Visual coverage of scene |
+| Gaussians | Model complexity / detail level |
 
 ### Limitations
 
@@ -823,27 +686,16 @@ MonoSplat is the only pipeline that combines:
 
 ---
 
-## Key Learnings
-
-- Capture quality has a greater impact than model complexity
-- COLMAP SfM alignment is the most failure-prone stage — good overlap is critical
-- Gaussian Splatting enables real-time rendering unlike NeRF
-- Data preprocessing and alignment are critical for training stability
-- Per-scene training is not a limitation — the model encodes the scene, not general rules
-
----
-
 ## Future Scope
 
-- Dedicated GPU worker (Runpod / Lambda Labs) for production training
-- Job queue with Redis for concurrent multi-user support
+- Dedicated GPU worker (Runpod / Lambda Labs) for production
+- Job queue with Redis for multi-user support
 - Cloud storage (S3 / Cloudflare R2) for persistent splat hosting
-- NeRF vs Gaussian Splatting side-by-side comparison viewer
+- NeRF vs Gaussian Splatting comparison viewer
 - VR headset support (OpenXR)
 - Multi-scene stitching
 - Model compression (fewer splats, same quality)
-- AR overlay on live camera feed
-- CUDA rasterizer upgrade (60+ FPS from current baseline)
+- CUDA rasterizer auto-install on setup
 
 ---
 
@@ -851,16 +703,16 @@ MonoSplat is the only pipeline that combines:
 
 | Item | Status |
 |------|--------|
-| Full modular source code | done |
-| FFmpeg frame extractor with image validation | done |
-| COLMAP automated SfM pipeline (sequential matching) | done |
-| Custom PyTorch Gaussian training with .splat export | done |
-| FastAPI server with Three.js browser viewer | done |
-| Web upload portal (single video, live job tracking) | done |
-| Dynamic hot-reload pipeline | done |
-| Google Colab GPU training notebook | done |
-| Unified YAML config | done |
-| Pipeline documentation | done |
+| Full modular source code | ✅ done |
+| FFmpeg frame extractor with image validation | ✅ done |
+| COLMAP automated SfM pipeline (sequential matching) | ✅ done |
+| Custom PyTorch Gaussian training with .splat export | ✅ done |
+| FastAPI server with Three.js browser viewer | ✅ done |
+| Web upload portal (single video, live job tracking) | ✅ done |
+| Local GPU training script with VRAM auto-detection | ✅ done |
+| Google Colab GPU training notebook | ✅ done |
+| Unified YAML config | ✅ done |
+| Pipeline documentation | ✅ done |
 
 ---
 
@@ -874,7 +726,7 @@ MonoSplat is the only pipeline that combines:
   https://github.com/mkkellogg/GaussianSplats3D
 - SuperSplat — Browser-based splat viewer and editor
   https://supersplat.playcanvas.com
-- diff-gaussian-rasterization — CUDA rasterizer (drop-in upgrade)
+- diff-gaussian-rasterization — CUDA rasterizer
   https://github.com/graphdeco-inria/diff-gaussian-rasterization
 
 ---
