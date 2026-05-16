@@ -1,52 +1,1048 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>MonoSplat | Video to 3D Gaussian Splat</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
-<style>
-  :root { --bg:#090b0f; --panel:#10141b; --panel-2:#151b24; --line:#253041; --text:#eef3f8; --muted:#8b98aa; --soft:#c4cedb; --brand:#21d19f; --warn:#f5b84b; --bad:#ef5b6b; --blue:#70a7ff; --radius:8px; --mono:'JetBrains Mono',Consolas,monospace; --sans:Inter,system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; }
-  * { box-sizing:border-box; } body { margin:0; min-height:100vh; background:var(--bg); color:var(--text); font-family:var(--sans); }
-  header { position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; gap:24px; padding:16px 32px; background:rgba(9,11,15,.92); border-bottom:1px solid var(--line); backdrop-filter:blur(14px); }
-  .brand { display:flex; align-items:baseline; gap:12px; } .brand-title { font-size:22px; font-weight:800; letter-spacing:0; } .brand-title span { color:var(--brand); } .brand-sub { color:var(--muted); font-size:12px; font-family:var(--mono); }
-  .header-metrics { display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; } .pill { border:1px solid var(--line); border-radius:999px; padding:7px 11px; color:var(--soft); font-size:12px; font-family:var(--mono); background:rgba(16,20,27,.8); }
-  main { display:grid; grid-template-columns:minmax(0,1.1fr) minmax(360px,.9fr); min-height:calc(100vh - 65px); } .capture { padding:44px clamp(24px,5vw,64px); border-right:1px solid var(--line); } .jobs { padding:32px; max-height:calc(100vh - 65px); overflow:auto; }
-  .eyebrow { color:var(--brand); font-family:var(--mono); font-size:12px; font-weight:600; margin-bottom:18px; } h1 { margin:0 0 14px; font-size:clamp(42px,7vw,76px); line-height:.94; letter-spacing:0; max-width:780px; } .intro { color:var(--soft); line-height:1.65; max-width:650px; margin:0 0 30px; }
-  .pipeline { display:grid; grid-template-columns:repeat(5,minmax(86px,1fr)); gap:8px; max-width:720px; margin-bottom:30px; } .step { border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); padding:11px; min-height:72px; } .step small { display:block; color:var(--brand); font-family:var(--mono); font-size:11px; margin-bottom:7px; } .step strong { display:block; font-size:13px; } .step span { display:block; color:var(--muted); font-size:11px; margin-top:3px; }
-  .form-block { max-width:720px; } label { display:block; color:var(--muted); font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.08em; margin-bottom:8px; } input[type="text"] { width:100%; height:48px; border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); color:var(--text); padding:0 14px; font:500 14px var(--sans); outline:none; } input[type="text"]:focus { border-color:var(--brand); box-shadow:0 0 0 3px rgba(33,209,159,.12); }
-  #file-input { display:none; } .dropzone { margin-top:16px; border:1px dashed #3a4658; border-radius:var(--radius); min-height:190px; display:grid; place-items:center; text-align:center; padding:28px; background:var(--panel); cursor:pointer; transition:border-color .18s,background .18s,transform .18s; } .dropzone.drag-over { border-color:var(--brand); background:rgba(33,209,159,.06); transform:translateY(-1px); } .dropzone h2 { margin:0 0 8px; font-size:22px; } .dropzone p { margin:0; color:var(--muted); line-height:1.55; }
-  .file-row { display:none; align-items:center; justify-content:space-between; gap:16px; margin-top:16px; padding:14px 16px; background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); } .file-row.show { display:flex; } .file-name { font-weight:700; } .file-meta { color:var(--muted); font-size:12px; margin-top:3px; font-family:var(--mono); }
-  button,.link-btn { border:1px solid var(--line); border-radius:6px; background:var(--panel-2); color:var(--text); font:700 13px var(--sans); cursor:pointer; text-decoration:none; transition:background .18s,border-color .18s,color .18s,transform .18s; } button:hover,.link-btn:hover { border-color:var(--brand); color:var(--brand); } .remove-btn { padding:8px 10px; color:var(--muted); } .submit-btn { width:100%; margin-top:16px; min-height:50px; background:var(--brand); color:#03120d; border-color:var(--brand); font-size:15px; } .submit-btn:hover:not(:disabled) { background:#34e4b2; color:#03120d; transform:translateY(-1px); } .submit-btn:disabled { background:#1a222d; border-color:var(--line); color:#697789; cursor:not-allowed; transform:none; }
-  .guide { margin-top:24px; border-top:1px solid var(--line); padding-top:20px; max-width:720px; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; } .tip { color:var(--soft); font-size:13px; line-height:1.45; } .tip b { color:var(--text); }
-  .jobs-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:18px; } .jobs-head h2 { margin:0; font-size:18px; } .actions { display:flex; gap:8px; } .actions button { padding:8px 10px; font-size:12px; color:var(--muted); }
-  .empty { min-height:260px; display:grid; place-items:center; text-align:center; color:var(--muted); border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); padding:28px; } .job-card { border:1px solid var(--line); border-radius:var(--radius); background:var(--panel); padding:16px; margin-bottom:12px; } .job-top { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; margin-bottom:10px; } .job-title { font-weight:800; overflow-wrap:anywhere; } .job-time { color:var(--muted); font-family:var(--mono); font-size:11px; margin-top:3px; }
-  .badge { border-radius:999px; padding:5px 8px; font:700 10px var(--mono); text-transform:uppercase; white-space:nowrap; } .b-waiting { color:var(--muted); background:rgba(139,152,170,.12); } .b-extracting,.b-colmap { color:var(--blue); background:rgba(112,167,255,.12); } .b-training,.b-ready_for_colab { color:var(--warn); background:rgba(245,184,75,.12); } .b-exporting,.b-ready { color:var(--brand); background:rgba(33,209,159,.12); } .b-failed { color:var(--bad); background:rgba(239,91,107,.12); }
-  .track { display:grid; grid-template-columns:repeat(5,1fr); gap:5px; margin:12px 0; } .track span { height:4px; border-radius:999px; background:#243043; } .track span.done { background:var(--brand); } .track span.active { background:var(--warn); } .progress { height:6px; background:#1d2634; border-radius:999px; overflow:hidden; margin:10px 0; } .progress>span { display:block; height:100%; width:0%; background:linear-gradient(90deg,var(--blue),var(--brand)); transition:width .35s; } .message { color:var(--soft); font-size:13px; line-height:1.45; min-height:19px; } .error { color:var(--bad); font-size:13px; margin-top:8px; line-height:1.45; }
-  .job-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; } .link-btn,.job-actions button { padding:9px 11px; font-size:12px; } .primary-link { background:rgba(33,209,159,.12); border-color:rgba(33,209,159,.35); color:var(--brand); } .handoff { margin-top:12px; border:1px solid rgba(245,184,75,.35); border-radius:var(--radius); padding:13px; background:rgba(245,184,75,.07); color:var(--soft); font-size:13px; line-height:1.5; } code { font-family:var(--mono); color:var(--brand); }
-  #toasts { position:fixed; right:20px; bottom:20px; display:grid; gap:8px; z-index:50; } .toast { width:min(360px,calc(100vw - 40px)); border:1px solid var(--brand); border-radius:var(--radius); padding:12px 14px; background:var(--panel); box-shadow:0 14px 38px rgba(0,0,0,.32); } .toast.err { border-color:var(--bad); } .toast strong { display:block; margin-bottom:3px; } .toast span { color:var(--muted); font-size:13px; line-height:1.4; }
-  @media (max-width:980px) { header { align-items:flex-start; flex-direction:column; padding:16px 20px; } main { grid-template-columns:1fr; } .capture { border-right:0; border-bottom:1px solid var(--line); padding:32px 20px; } .jobs { max-height:none; padding:24px 20px; } .pipeline { grid-template-columns:repeat(2,minmax(0,1fr)); } } @media (max-width:560px) { .guide,.pipeline { grid-template-columns:1fr; } .jobs-head { align-items:flex-start; flex-direction:column; } }
-</style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MonoSplat | Video to 3D Gaussian Splat</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+
+  <style>
+    /* ── Design tokens ──────────────────────────────────────────────── */
+    :root {
+      --bg:       #090b0f;
+      --panel:    #10141b;
+      --panel-2:  #151b24;
+      --line:     #253041;
+      --text:     #eef3f8;
+      --muted:    #8b98aa;
+      --soft:     #c4cedb;
+      --brand:    #21d19f;
+      --warn:     #f5b84b;
+      --bad:      #ef5b6b;
+      --blue:     #70a7ff;
+      --radius:   8px;
+      --mono:     'JetBrains Mono', Consolas, monospace;
+      --sans:     Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    }
+
+    /* ── Reset & base ───────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+    }
+
+    /* ── Header ─────────────────────────────────────────────────────── */
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 16px 32px;
+      background: rgba(9,11,15,.92);
+      border-bottom: 1px solid var(--line);
+      backdrop-filter: blur(14px);
+    }
+    .brand           { display: flex; align-items: baseline; gap: 12px; }
+    .brand-title     { font-size: 22px; font-weight: 800; }
+    .brand-title span { color: var(--brand); }
+    .brand-sub       { color: var(--muted); font-size: 12px; font-family: var(--mono); }
+    .header-metrics  { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+    .pill {
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 7px 11px;
+      color: var(--soft);
+      font-size: 12px;
+      font-family: var(--mono);
+      background: rgba(16,20,27,.8);
+    }
+
+    /* ── Two-column layout ──────────────────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 1.1fr) minmax(360px, .9fr);
+      min-height: calc(100vh - 65px);
+    }
+    .capture {
+      padding: 44px clamp(24px, 5vw, 64px);
+      border-right: 1px solid var(--line);
+    }
+    .jobs {
+      padding: 32px;
+      max-height: calc(100vh - 65px);
+      overflow: auto;
+    }
+
+    /* ── Capture column ─────────────────────────────────────────────── */
+    .eyebrow {
+      color: var(--brand);
+      font-family: var(--mono);
+      font-size: 12px;
+      font-weight: 600;
+      margin-bottom: 18px;
+    }
+    h1 {
+      margin: 0 0 14px;
+      font-size: clamp(36px, 6vw, 68px);
+      line-height: .94;
+      max-width: 780px;
+    }
+    .intro {
+      color: var(--soft);
+      line-height: 1.65;
+      max-width: 650px;
+      margin: 0 0 30px;
+    }
+
+    /* ── Pipeline steps ─────────────────────────────────────────────── */
+    .pipeline {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(86px, 1fr));
+      gap: 8px;
+      max-width: 720px;
+      margin-bottom: 30px;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 11px;
+      min-height: 72px;
+    }
+    .step small  { display: block; color: var(--brand); font-family: var(--mono); font-size: 11px; margin-bottom: 7px; }
+    .step strong { display: block; font-size: 13px; }
+    .step span   { display: block; color: var(--muted); font-size: 11px; margin-top: 3px; }
+
+    /* ── Upload form ─────────────────────────────────────────────────── */
+    .form-block { max-width: 720px; }
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      margin-bottom: 8px;
+    }
+    input[type="text"] {
+      width: 100%;
+      height: 48px;
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      color: var(--text);
+      padding: 0 14px;
+      font: 500 14px var(--sans);
+      outline: none;
+    }
+    input[type="text"]:focus {
+      border-color: var(--brand);
+      box-shadow: 0 0 0 3px rgba(33,209,159,.12);
+    }
+    #file-input { display: none; }
+
+    /* ── Drop zone ───────────────────────────────────────────────────── */
+    .dropzone {
+      margin-top: 16px;
+      border: 1px dashed #3a4658;
+      border-radius: var(--radius);
+      min-height: 190px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      padding: 28px;
+      background: var(--panel);
+      cursor: pointer;
+      transition: border-color .18s, background .18s, transform .18s;
+    }
+    .dropzone:hover,
+    .dropzone.drag-over {
+      border-color: var(--brand);
+      background: rgba(33,209,159,.06);
+      transform: translateY(-1px);
+    }
+    .dropzone h2 { margin: 0 0 8px; font-size: 22px; }
+    .dropzone p  { margin: 0; color: var(--muted); line-height: 1.55; }
+
+    /* ── Format chips inside dropzone ───────────────────────────────── */
+    .format-chips {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      justify-content: center;
+      margin-top: 12px;
+    }
+    .chip {
+      border: 1px solid var(--line);
+      border-radius: 4px;
+      padding: 3px 7px;
+      font-size: 11px;
+      font-family: var(--mono);
+      color: var(--muted);
+    }
+
+    /* ── Selected file row ──────────────────────────────────────────── */
+    .file-row {
+      display: none;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-top: 16px;
+      padding: 14px 16px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+    }
+    .file-row.show { display: flex; }
+    .file-name     { font-weight: 700; }
+    .file-meta     { color: var(--muted); font-size: 12px; margin-top: 3px; font-family: var(--mono); }
+
+    /* ── Validation warning banner ──────────────────────────────────── */
+    .file-warn {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 10px 14px;
+      background: rgba(245,184,75,.08);
+      border: 1px solid rgba(245,184,75,.35);
+      border-radius: var(--radius);
+      color: var(--warn);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    .file-warn.show { display: flex; }
+
+    /* ── Buttons ─────────────────────────────────────────────────────── */
+    button, .link-btn {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--text);
+      font: 700 13px var(--sans);
+      cursor: pointer;
+      text-decoration: none;
+      transition: background .18s, border-color .18s, color .18s, transform .18s;
+    }
+    button:hover, .link-btn:hover {
+      border-color: var(--brand);
+      color: var(--brand);
+    }
+    .remove-btn { padding: 8px 10px; color: var(--muted); }
+    .submit-btn {
+      width: 100%;
+      margin-top: 16px;
+      min-height: 50px;
+      background: var(--brand);
+      color: #03120d;
+      border-color: var(--brand);
+      font-size: 15px;
+    }
+    .submit-btn:hover:not(:disabled) {
+      background: #34e4b2;
+      color: #03120d;
+      transform: translateY(-1px);
+    }
+    .submit-btn:disabled {
+      background: #1a222d;
+      border-color: var(--line);
+      color: #697789;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    /* ── Tips grid ───────────────────────────────────────────────────── */
+    .guide {
+      margin-top: 24px;
+      border-top: 1px solid var(--line);
+      padding-top: 20px;
+      max-width: 720px;
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 12px;
+    }
+    .tip   { color: var(--soft); font-size: 13px; line-height: 1.45; }
+    .tip b { color: var(--text); }
+
+    /* ── Compat note ─────────────────────────────────────────────────── */
+    .compat-note {
+      margin-top: 20px;
+      padding: 12px 14px;
+      background: rgba(112,167,255,.06);
+      border: 1px solid rgba(112,167,255,.2);
+      border-radius: var(--radius);
+      color: var(--soft);
+      font-size: 12px;
+      line-height: 1.55;
+      max-width: 720px;
+    }
+    .compat-note b { color: var(--blue); }
+
+    /* ── Jobs panel ──────────────────────────────────────────────────── */
+    .jobs-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+    .jobs-head h2 { margin: 0; font-size: 18px; }
+    .actions      { display: flex; gap: 8px; }
+    .actions button { padding: 8px 10px; font-size: 12px; color: var(--muted); }
+
+    .empty {
+      min-height: 260px;
+      display: grid;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 28px;
+    }
+
+    /* ── Job card ────────────────────────────────────────────────────── */
+    .job-card {
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      background: var(--panel);
+      padding: 16px;
+      margin-bottom: 12px;
+    }
+    .job-top {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .job-title { font-weight: 800; overflow-wrap: anywhere; }
+    .job-time  { color: var(--muted); font-family: var(--mono); font-size: 11px; margin-top: 3px; }
+
+    /* ── Status badges ──────────────────────────────────────────────── */
+    .badge {
+      border-radius: 999px;
+      padding: 5px 8px;
+      font: 700 10px var(--mono);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+    .b-waiting         { color: var(--muted); background: rgba(139,152,170,.12); }
+    .b-extracting,
+    .b-colmap          { color: var(--blue);  background: rgba(112,167,255,.12); }
+    .b-training,
+    .b-ready_for_colab { color: var(--warn);  background: rgba(245,184,75,.12); }
+    .b-exporting,
+    .b-ready           { color: var(--brand); background: rgba(33,209,159,.12); }
+    .b-failed          { color: var(--bad);   background: rgba(239,91,107,.12); }
+
+    /* ── Stage track ─────────────────────────────────────────────────── */
+    .track {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+      margin: 12px 0;
+    }
+    .track span        { height: 4px; border-radius: 999px; background: #243043; }
+    .track span.done   { background: var(--brand); }
+    .track span.active { background: var(--warn); }
+
+    /* ── Progress bar ────────────────────────────────────────────────── */
+    .progress {
+      height: 6px;
+      background: #1d2634;
+      border-radius: 999px;
+      overflow: hidden;
+      margin: 10px 0;
+    }
+    .progress > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, var(--blue), var(--brand));
+      transition: width .35s;
+    }
+
+    /* ── Job text ────────────────────────────────────────────────────── */
+    .message { color: var(--soft); font-size: 13px; line-height: 1.45; min-height: 19px; }
+    .error   { color: var(--bad);  font-size: 13px; margin-top: 8px; line-height: 1.45; }
+
+    /* ── Inline metrics ──────────────────────────────────────────────── */
+    .job-metrics {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 8px;
+    }
+    .metric   { font-size: 11px; font-family: var(--mono); color: var(--muted); }
+    .metric b { color: var(--soft); }
+
+    /* ── Job actions ─────────────────────────────────────────────────── */
+    .job-actions    { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .link-btn,
+    .job-actions button { padding: 9px 11px; font-size: 12px; }
+    .primary-link {
+      background: rgba(33,209,159,.12);
+      border-color: rgba(33,209,159,.35);
+      color: var(--brand);
+    }
+
+    /* ── Handoff box ─────────────────────────────────────────────────── */
+    .handoff {
+      margin-top: 12px;
+      border: 1px solid rgba(245,184,75,.35);
+      border-radius: var(--radius);
+      padding: 13px;
+      background: rgba(245,184,75,.07);
+      color: var(--soft);
+      font-size: 13px;
+      line-height: 1.7;
+    }
+    code { font-family: var(--mono); color: var(--brand); }
+
+    /* ── Toasts ──────────────────────────────────────────────────────── */
+    #toasts {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      display: grid;
+      gap: 8px;
+      z-index: 50;
+    }
+    .toast {
+      width: min(360px, calc(100vw - 40px));
+      border: 1px solid var(--brand);
+      border-radius: var(--radius);
+      padding: 12px 14px;
+      background: var(--panel);
+      box-shadow: 0 14px 38px rgba(0,0,0,.32);
+    }
+    .toast.err    { border-color: var(--bad); }
+    .toast strong { display: block; margin-bottom: 3px; }
+    .toast span   { color: var(--muted); font-size: 13px; line-height: 1.4; }
+
+    /* ── Responsive ──────────────────────────────────────────────────── */
+    @media (max-width: 980px) {
+      header   { align-items: flex-start; flex-direction: column; padding: 16px 20px; }
+      main     { grid-template-columns: 1fr; }
+      .capture { border-right: 0; border-bottom: 1px solid var(--line); padding: 32px 20px; }
+      .jobs    { max-height: none; padding: 24px 20px; }
+      .pipeline { grid-template-columns: repeat(2, minmax(0,1fr)); }
+    }
+    @media (max-width: 560px) {
+      .guide, .pipeline { grid-template-columns: 1fr; }
+      .jobs-head { align-items: flex-start; flex-direction: column; }
+    }
+  </style>
 </head>
+
 <body>
-<header><div class="brand"><div class="brand-title">Mono<span>Splat</span></div><div class="brand-sub">single-camera 3D reconstruction</div></div><div class="header-metrics"><span class="pill" id="hdr-ready">0 ready</span><span class="pill" id="hdr-handoff">0 ready for GPU</span><span class="pill" id="hdr-active">0 active</span></div></header>
-<main><section class="capture"><div class="eyebrow">Product capture pipeline</div><h1>Turn a phone video into a browser-ready 3D splat.</h1><p class="intro">Upload one clean walk-around video. MonoSplat extracts frames, estimates camera poses with COLMAP, prepares GPU training, and serves the completed splat in the browser.</p><div class="pipeline" aria-label="Pipeline stages"><div class="step"><small>01</small><strong>Upload</strong><span>MP4, MOV, AVI, MKV</span></div><div class="step"><small>02</small><strong>Frames</strong><span>FFmpeg extraction</span></div><div class="step"><small>03</small><strong>Poses</strong><span>COLMAP SfM</span></div><div class="step"><small>04</small><strong>Train</strong><span>CUDA or Colab GPU</span></div><div class="step"><small>05</small><strong>View</strong><span>Shareable .splat</span></div></div><div class="form-block"><label for="scene-name">Scene or product name</label><input id="scene-name" type="text" placeholder="Example: demo shoe scan" autocomplete="off"><input type="file" id="file-input" accept="video/mp4,video/quicktime,video/x-msvideo,video/*"><div class="dropzone" id="dropzone" role="button" tabindex="0"><div><h2>Drop video here</h2><p>Click to browse, or drag a single video file.<br>Best results: 35-45 seconds, slow orbit, locked exposure.</p></div></div><div class="file-row" id="selected-file"><div><div class="file-name" id="fname">No file selected</div><div class="file-meta" id="fmeta"></div></div><button class="remove-btn" id="remove-btn" type="button">Remove</button></div><button class="submit-btn" id="submit-btn" type="button" disabled>Upload and start pipeline</button></div><div class="guide"><div class="tip"><b>Move around the subject.</b> Keep 60-80% overlap between frames.</div><div class="tip"><b>Use textured objects.</b> Smooth, shiny, or transparent surfaces are unreliable.</div><div class="tip"><b>Keep lighting steady.</b> Lock focus and exposure before recording.</div><div class="tip"><b>Avoid cuts and blur.</b> One continuous slow video works best.</div></div></section><section class="jobs"><div class="jobs-head"><h2>Reconstruction Jobs</h2><div class="actions"><button type="button" id="clear-failed-btn" onclick="clearFailed()" style="display:none">Clear failed</button><button type="button" id="clear-all-btn" onclick="clearAll()" style="display:none">Clear finished</button></div></div><div id="empty-state" class="empty">No jobs yet. Upload a video to start the first reconstruction.</div><div id="job-list"></div></section></main><div id="toasts"></div>
+
+<!-- ════════════════════════════════════════════════════════
+     HEADER
+════════════════════════════════════════════════════════ -->
+<header>
+  <div class="brand">
+    <div class="brand-title">Mono<span>Splat</span></div>
+    <div class="brand-sub">single-camera 3D reconstruction</div>
+  </div>
+  <div class="header-metrics">
+    <span class="pill" id="hdr-ready">0 ready</span>
+    <span class="pill" id="hdr-handoff">0 ready for GPU</span>
+    <span class="pill" id="hdr-active">0 active</span>
+  </div>
+</header>
+
+
+<!-- ════════════════════════════════════════════════════════
+     MAIN
+════════════════════════════════════════════════════════ -->
+<main>
+
+  <!-- ── LEFT: Upload capture panel ─────────────────────── -->
+  <section class="capture">
+
+    <div class="eyebrow">Product capture pipeline</div>
+
+    <h1>Turn a phone video into a browser-ready 3D splat.</h1>
+
+    <p class="intro">
+      Upload one clean walk-around video. MonoSplat extracts frames, estimates
+      camera poses with COLMAP, prepares GPU training, and serves the completed
+      splat in the browser. Portrait and landscape videos are fully supported.
+    </p>
+
+    <!-- Pipeline steps -->
+    <div class="pipeline" aria-label="Pipeline stages">
+      <div class="step">
+        <small>01</small>
+        <strong>Upload</strong>
+        <span>MP4, MOV, AVI, MKV</span>
+      </div>
+      <div class="step">
+        <small>02</small>
+        <strong>Frames</strong>
+        <span>FFmpeg adaptive fps</span>
+      </div>
+      <div class="step">
+        <small>03</small>
+        <strong>Poses</strong>
+        <span>COLMAP SfM</span>
+      </div>
+      <div class="step">
+        <small>04</small>
+        <strong>Train</strong>
+        <span>CUDA or Colab GPU</span>
+      </div>
+      <div class="step">
+        <small>05</small>
+        <strong>View</strong>
+        <span>Shareable .splat</span>
+      </div>
+    </div>
+
+    <!-- Upload form -->
+    <div class="form-block">
+
+      <label for="scene-name">Scene or product name</label>
+      <input id="scene-name" type="text"
+             placeholder="Example: demo shoe scan" autocomplete="off">
+
+      <input type="file" id="file-input"
+             accept="video/mp4,video/quicktime,video/x-msvideo,video/*">
+
+      <!-- Drop zone -->
+      <div class="dropzone" id="dropzone" role="button" tabindex="0"
+           aria-label="Click to select a video file, or drag and drop">
+        <div>
+          <h2>Drop video here</h2>
+          <p>
+            Click to browse, or drag a single video file.<br>
+            Best results: 30–45 seconds, slow orbit, locked exposure.
+          </p>
+          <div class="format-chips">
+            <span class="chip">MP4</span>
+            <span class="chip">MOV</span>
+            <span class="chip">AVI</span>
+            <span class="chip">MKV</span>
+            <span class="chip">portrait ✓</span>
+            <span class="chip">landscape ✓</span>
+            <span class="chip">24 / 30 / 60 fps ✓</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Selected file display -->
+      <div class="file-row" id="selected-file">
+        <div>
+          <div class="file-name" id="fname">No file selected</div>
+          <div class="file-meta" id="fmeta"></div>
+        </div>
+        <button class="remove-btn" id="remove-btn" type="button"
+                aria-label="Remove selected file">Remove</button>
+      </div>
+
+      <!-- Soft validation warning -->
+      <div class="file-warn" id="file-warn">
+        <span aria-hidden="true">⚠</span>
+        <span id="file-warn-text"></span>
+      </div>
+
+      <button class="submit-btn" id="submit-btn" type="button" disabled>
+        Upload and start pipeline
+      </button>
+    </div>
+
+    <!-- Shooting tips -->
+    <div class="guide">
+      <div class="tip">
+        <b>Move around the subject.</b>
+        Keep 60–80% overlap between frames. Orbit slowly — about one step per second.
+      </div>
+      <div class="tip">
+        <b>Use textured objects.</b>
+        Smooth, shiny, or transparent surfaces are unreliable. Place the object on
+        a textured surface like newspaper or graph paper.
+      </div>
+      <div class="tip">
+        <b>Keep lighting steady.</b>
+        Lock focus and exposure before recording. Avoid harsh specular highlights
+        and heavy shadows.
+      </div>
+      <div class="tip">
+        <b>Avoid cuts and motion blur.</b>
+        One continuous slow orbit works best. High-framerate sources (60 fps) are
+        automatically downsampled — no manual adjustment needed.
+      </div>
+    </div>
+
+    <!-- Compat note -->
+    <div class="compat-note">
+      <b>All aspect ratios supported.</b>
+      Portrait (e.g. 1080×1920, 1238×2200), landscape (1920×1080, 1280×720), and
+      square videos are handled correctly. Frame extraction, COLMAP pose estimation,
+      and the 3D renderer all preserve the original camera aspect ratio.
+      High-framerate sources (60 fps) are automatically capped during extraction to
+      avoid near-duplicate frames.
+    </div>
+
+  </section>
+
+
+  <!-- ── RIGHT: Jobs panel ───────────────────────────────── -->
+  <section class="jobs">
+
+    <div class="jobs-head">
+      <h2>Reconstruction Jobs</h2>
+      <div class="actions">
+        <button type="button" id="clear-failed-btn"
+                onclick="clearFailed()" style="display:none">Clear failed</button>
+        <button type="button" id="clear-all-btn"
+                onclick="clearAll()"   style="display:none">Clear finished</button>
+      </div>
+    </div>
+
+    <div id="empty-state" class="empty">
+      No jobs yet. Upload a video to start the first reconstruction.
+    </div>
+    <div id="job-list"></div>
+
+  </section>
+
+</main>
+
+<div id="toasts"></div>
+
+
+<!-- ════════════════════════════════════════════════════════
+     JAVASCRIPT
+════════════════════════════════════════════════════════ -->
 <script>
-let selectedFile=null; let jobs=[]; const sseMap={}; const terminalStatuses=['ready','ready_for_colab','failed']; const activeStatuses=['waiting','extracting','colmap','training','exporting']; const pipelineStages=['extracting','colmap','training','exporting','ready'];
-const dropzone=document.getElementById('dropzone'), fileInput=document.getElementById('file-input'), selectedEl=document.getElementById('selected-file'), fnameEl=document.getElementById('fname'), fmetaEl=document.getElementById('fmeta'), removeBtn=document.getElementById('remove-btn'), submitBtn=document.getElementById('submit-btn'), sceneInput=document.getElementById('scene-name');
-dropzone.addEventListener('click',()=>fileInput.click()); dropzone.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' ')fileInput.click();}); dropzone.addEventListener('dragover',e=>{e.preventDefault();dropzone.classList.add('drag-over');}); dropzone.addEventListener('dragleave',()=>dropzone.classList.remove('drag-over')); dropzone.addEventListener('drop',e=>{e.preventDefault();dropzone.classList.remove('drag-over'); if(e.dataTransfer.files[0])setFile(e.dataTransfer.files[0]);}); fileInput.addEventListener('change',()=>{if(fileInput.files[0])setFile(fileInput.files[0]);}); removeBtn.addEventListener('click',clearFile); sceneInput.addEventListener('input',updateSubmit);
-function setFile(file){selectedFile=file; fnameEl.textContent=file.name; fmetaEl.textContent=`${(file.size/1e6).toFixed(1)} MB`; selectedEl.classList.add('show'); dropzone.style.display='none'; updateSubmit();} function clearFile(){selectedFile=null; fileInput.value=''; selectedEl.classList.remove('show'); dropzone.style.display=''; updateSubmit();} function updateSubmit(){submitBtn.disabled=!(selectedFile&&sceneInput.value.trim());}
-submitBtn.addEventListener('click',async()=>{ if(!selectedFile||!sceneInput.value.trim())return; submitBtn.disabled=true; submitBtn.textContent='Uploading...'; const fd=new FormData(); fd.append('item_name',sceneInput.value.trim()); fd.append('files',selectedFile); try{const res=await fetch('/upload',{method:'POST',body:fd}); const data=await res.json(); if(!res.ok)throw new Error(data.detail||'Upload failed'); toast('Upload complete',`${data.item_name} is queued.`); clearFile(); sceneInput.value=''; updateSubmit(); await fetchJobs(); subscribeSSE(data.job_id);}catch(err){toast('Upload failed',err.message,true);}finally{submitBtn.textContent='Upload and start pipeline'; updateSubmit();}});
-function subscribeSSE(jobId){ if(sseMap[jobId]||!jobId)return; const es=new EventSource(`/api/jobs/${jobId}/stream`); sseMap[jobId]=es; es.onmessage=(event)=>{const data=JSON.parse(event.data); if(data.error)return; const idx=jobs.findIndex(j=>j.job_id===jobId); if(idx>=0)jobs[idx]={...jobs[idx],...data}; else jobs.unshift(data); renderJobs(); if(data.done||terminalStatuses.includes(data.status)){es.close(); delete sseMap[jobId]; if(data.status==='ready')toast('Model ready',`${data.item_name||jobId} can be viewed now.`); if(data.status==='ready_for_colab')toast('Ready for GPU training','Zip this job and continue in the Colab notebook.');}}; es.onerror=()=>{es.close(); delete sseMap[jobId];};}
-async function fetchJobs(){try{const res=await fetch('/api/jobs'); jobs=await res.json(); renderJobs(); jobs.forEach(job=>{if(!terminalStatuses.includes(job.status))subscribeSSE(job.job_id);});}catch(err){toast('Could not load jobs',err.message,true);}}
-function renderJobs(){const list=document.getElementById('job-list'), empty=document.getElementById('empty-state'); list.innerHTML=''; if(!jobs.length){empty.style.display='grid';}else{empty.style.display='none'; jobs.forEach(job=>list.appendChild(makeCard(job)));} updateHeader();}
-function makeCard(job){const card=document.createElement('div'); card.className='job-card'; card.dataset.jid=job.job_id; const status=job.status||'waiting'; const created=job.created_at?new Date(job.created_at).toLocaleString():''; const progress=Math.max(0,Math.min(100,job.progress||0)); const canDelete=!activeStatuses.includes(status); const readyActions=status==='ready'?`<a class="link-btn primary-link" href="/viewer/${job.job_id}" target="_blank" rel="noopener">Open viewer</a><a class="link-btn" href="/splat/${job.job_id}" download>Download .splat</a><a class="link-btn" href="/ply/${job.job_id}" download>Download .ply</a>`:''; const deleteAction=canDelete?`<button type="button" onclick="deleteJob('${job.job_id}')">Remove</button>`:''; card.innerHTML=`<div class="job-top"><div><div class="job-title">${escapeHtml(job.item_name||job.job_id)}</div><div class="job-time">${created}</div></div><span class="badge b-${status}">${status.replaceAll('_',' ')}</span></div>${buildTrack(status)}<div class="progress"><span style="width:${progress}%"></span></div><div class="message">${escapeHtml(job.message||'Waiting to start')}</div>${job.error?`<div class="error">${escapeHtml(job.error)}</div>`:''}${status==='ready_for_colab'?buildHandoff(job):''}<div class="job-actions">${readyActions}${deleteAction}</div>`; return card;}
-function buildTrack(status){const mapped=status==='ready_for_colab'?'training':status; const current=pipelineStages.indexOf(mapped); const failed=status==='failed'; return `<div class="track">${pipelineStages.map((stage,index)=>{const cls=failed?'':(index<current||status==='ready')?'done':index===current?'active':''; return `<span class="${cls}" title="${stage}"></span>`;}).join('')}</div>`;} function buildHandoff(job){return `<div class="handoff">COLMAP is complete. Continue training on a GPU with <code>python scripts/zip_for_colab.py ${job.job_id}</code>, then open <code>notebooks/monosplat_colab_gpu.ipynb</code>. After downloading the output, place the .splat and .ply files in <code>work/${job.job_id}/models/gaussian/</code>.</div>`;}
-function updateHeader(){const ready=jobs.filter(j=>j.status==='ready').length, handoff=jobs.filter(j=>j.status==='ready_for_colab').length, active=jobs.filter(j=>activeStatuses.includes(j.status)).length; document.getElementById('hdr-ready').textContent=`${ready} ready`; document.getElementById('hdr-handoff').textContent=`${handoff} ready for GPU`; document.getElementById('hdr-active').textContent=`${active} active`; document.getElementById('clear-failed-btn').style.display=jobs.some(j=>j.status==='failed')?'inline-block':'none'; document.getElementById('clear-all-btn').style.display=jobs.some(j=>!activeStatuses.includes(j.status))?'inline-block':'none';}
-async function deleteJob(jobId){try{const res=await fetch(`/api/jobs/${jobId}`,{method:'DELETE'}); const data=await res.json(); if(!res.ok)throw new Error(data.detail||'Delete failed'); jobs=jobs.filter(j=>j.job_id!==jobId); renderJobs();}catch(err){toast('Delete failed',err.message,true);}} async function clearFailed(){await clearJobs('failed');} async function clearAll(){await clearJobs('all');} async function clearJobs(mode){try{const res=await fetch(`/api/jobs?mode=${mode}`,{method:'DELETE'}); const data=await res.json(); if(!res.ok)throw new Error(data.detail||'Clear failed'); toast('Cleared',`${data.cleared} job(s) removed.`); await fetchJobs();}catch(err){toast('Clear failed',err.message,true);}}
-function toast(title,message,isError){const wrap=document.getElementById('toasts'); const el=document.createElement('div'); el.className=`toast${isError?' err':''}`; el.innerHTML=`<strong>${escapeHtml(title)}</strong><span>${escapeHtml(message||'')}</span>`; wrap.appendChild(el); setTimeout(()=>{el.style.opacity='0'; el.style.transition='opacity .25s'; setTimeout(()=>el.remove(),260);},4500);} function escapeHtml(value){return String(value).replace(/[&<>'"]/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[ch]));}
-fetchJobs(); setInterval(fetchJobs,10000);
+
+  /* ── Constants & state ─────────────────────────────────── */
+  const TERMINAL = ['ready', 'ready_for_colab', 'failed'];
+  const ACTIVE   = ['waiting', 'extracting', 'colmap', 'training', 'exporting'];
+  const STAGES   = ['extracting', 'colmap', 'training', 'exporting', 'ready'];
+
+  const SUPPORTED_EXTS  = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
+  const WARN_SIZE_BYTES = 2 * 1024 * 1024 * 1024; // 2 GB soft warning
+
+  let selectedFile = null;
+  let jobs         = [];
+  const sseMap     = {};
+
+
+  /* ── DOM references ────────────────────────────────────── */
+  const dropzone    = document.getElementById('dropzone');
+  const fileInput   = document.getElementById('file-input');
+  const selectedEl  = document.getElementById('selected-file');
+  const fnameEl     = document.getElementById('fname');
+  const fmetaEl     = document.getElementById('fmeta');
+  const removeBtn   = document.getElementById('remove-btn');
+  const submitBtn   = document.getElementById('submit-btn');
+  const sceneInput  = document.getElementById('scene-name');
+  const fileWarn    = document.getElementById('file-warn');
+  const fileWarnTxt = document.getElementById('file-warn-text');
+
+
+  /* ── Drop zone ─────────────────────────────────────────── */
+  dropzone.addEventListener('click',   () => fileInput.click());
+  dropzone.addEventListener('keydown', e => {
+    if (e.key === 'Enter' || e.key === ' ') fileInput.click();
+  });
+  dropzone.addEventListener('dragover', e => {
+    e.preventDefault();
+    dropzone.classList.add('drag-over');
+  });
+  dropzone.addEventListener('dragleave', () => {
+    dropzone.classList.remove('drag-over');
+  });
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) setFile(fileInput.files[0]);
+  });
+  removeBtn.addEventListener('click', clearFile);
+  sceneInput.addEventListener('input', updateSubmit);
+
+
+  /* ── File selection ────────────────────────────────────── */
+  function setFile(file) {
+    selectedFile = file;
+    fnameEl.textContent = file.name;
+
+    const sizeMB      = (file.size / 1e6).toFixed(1);
+    const durationHint = guessDuration(file);
+    fmetaEl.textContent = sizeMB + ' MB' + (durationHint ? '  ·  ' + durationHint : '');
+
+    selectedEl.classList.add('show');
+    dropzone.style.display = 'none';
+
+    // Soft warnings
+    const warnings = [];
+    if (file.size > WARN_SIZE_BYTES) {
+      warnings.push('Very large file — upload may take a while on slow connections.');
+    }
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (!SUPPORTED_EXTS.includes(ext)) {
+      warnings.push(`".${ext}" may not be supported — prefer MP4 or MOV.`);
+    }
+
+    if (warnings.length) {
+      fileWarnTxt.textContent = warnings.join(' ');
+      fileWarn.classList.add('show');
+    } else {
+      fileWarn.classList.remove('show');
+    }
+
+    updateSubmit();
+  }
+
+  function clearFile() {
+    selectedFile       = null;
+    fileInput.value    = '';
+    selectedEl.classList.remove('show');
+    fileWarn.classList.remove('show');
+    dropzone.style.display = '';
+    updateSubmit();
+  }
+
+  function updateSubmit() {
+    submitBtn.disabled = !(selectedFile && sceneInput.value.trim());
+  }
+
+  /** Rough bitrate-based duration estimate for display only. */
+  function guessDuration(file) {
+    const bytesPerSec = 8e6 / 8; // assume ~8 Mbps H.264
+    const sec = Math.round(file.size / bytesPerSec);
+    if (sec < 3 || sec > 3600) return '';
+    return `~${sec}s`;
+  }
+
+
+  /* ── Upload ────────────────────────────────────────────── */
+  submitBtn.addEventListener('click', async () => {
+    if (!selectedFile || !sceneInput.value.trim()) return;
+
+    submitBtn.disabled    = true;
+    submitBtn.textContent = 'Uploading…';
+
+    const fd = new FormData();
+    fd.append('item_name', sceneInput.value.trim());
+    fd.append('files',     selectedFile);
+
+    try {
+      const res  = await fetch('/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Upload failed');
+
+      toast('Upload complete', `${data.item_name} is queued.`);
+      clearFile();
+      sceneInput.value = '';
+      updateSubmit();
+      await fetchJobs();
+      subscribeSSE(data.job_id);
+
+    } catch (err) {
+      toast('Upload failed', err.message, true);
+    } finally {
+      submitBtn.textContent = 'Upload and start pipeline';
+      updateSubmit();
+    }
+  });
+
+
+  /* ── SSE subscription ──────────────────────────────────── */
+  function subscribeSSE(jobId) {
+    if (sseMap[jobId] || !jobId) return;
+
+    const es      = new EventSource(`/api/jobs/${jobId}/stream`);
+    sseMap[jobId] = es;
+
+    es.onmessage = event => {
+      const data = JSON.parse(event.data);
+      if (data.error) return;
+
+      const idx = jobs.findIndex(j => j.job_id === jobId);
+      if (idx >= 0) jobs[idx] = { ...jobs[idx], ...data };
+      else          jobs.unshift(data);
+
+      renderJobs();
+
+      if (data.done || TERMINAL.includes(data.status)) {
+        es.close();
+        delete sseMap[jobId];
+        if (data.status === 'ready') {
+          toast('Model ready', `${data.item_name || jobId} can be viewed now.`);
+        }
+        if (data.status === 'ready_for_colab') {
+          toast('Ready for GPU training', 'Zip this job and continue in the Colab notebook.');
+        }
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      delete sseMap[jobId];
+    };
+  }
+
+
+  /* ── Fetch all jobs ────────────────────────────────────── */
+  async function fetchJobs() {
+    try {
+      const res = await fetch('/api/jobs');
+      jobs = await res.json();
+      renderJobs();
+      jobs.forEach(job => {
+        if (!TERMINAL.includes(job.status)) subscribeSSE(job.job_id);
+      });
+    } catch (err) {
+      toast('Could not load jobs', err.message, true);
+    }
+  }
+
+
+  /* ── Render job list ───────────────────────────────────── */
+  function renderJobs() {
+    const list  = document.getElementById('job-list');
+    const empty = document.getElementById('empty-state');
+    list.innerHTML = '';
+
+    if (!jobs.length) {
+      empty.style.display = 'grid';
+    } else {
+      empty.style.display = 'none';
+      jobs.forEach(job => list.appendChild(makeCard(job)));
+    }
+
+    updateHeader();
+  }
+
+
+  /* ── Build a single job card ───────────────────────────── */
+  function makeCard(job) {
+    const card     = document.createElement('div');
+    card.className = 'job-card';
+    card.dataset.jid = job.job_id;
+
+    const status   = job.status || 'waiting';
+    const created  = job.created_at ? new Date(job.created_at).toLocaleString() : '';
+    const progress = Math.max(0, Math.min(100, job.progress || 0));
+    const canDelete = !ACTIVE.includes(status);
+
+    const readyActions = status === 'ready'
+      ? `<a class="link-btn primary-link" href="/viewer/${job.job_id}"
+            target="_blank" rel="noopener">Open viewer</a>
+         <a class="link-btn" href="/splat/${job.job_id}" download>Download .splat</a>
+         <a class="link-btn" href="/ply/${job.job_id}"   download>Download .ply</a>`
+      : '';
+
+    const deleteAction = canDelete
+      ? `<button type="button" onclick="deleteJob('${job.job_id}')">Remove</button>`
+      : '';
+
+    card.innerHTML = `
+      <div class="job-top">
+        <div>
+          <div class="job-title">${escapeHtml(job.item_name || job.job_id)}</div>
+          <div class="job-time">${created}</div>
+        </div>
+        <span class="badge b-${status}">${status.replaceAll('_', ' ')}</span>
+      </div>
+
+      ${buildTrack(status)}
+
+      <div class="progress"><span style="width:${progress}%"></span></div>
+
+      <div class="message">${escapeHtml(job.message || 'Waiting to start…')}</div>
+
+      ${job.error ? `<div class="error">${escapeHtml(job.error)}</div>` : ''}
+
+      ${buildMetrics(job)}
+
+      ${status === 'ready_for_colab' ? buildHandoff(job) : ''}
+
+      <div class="job-actions">${readyActions}${deleteAction}</div>
+    `;
+
+    return card;
+  }
+
+
+  /* ── Stage progress track ──────────────────────────────── */
+  function buildTrack(status) {
+    const mapped  = status === 'ready_for_colab' ? 'training' : status;
+    const current = STAGES.indexOf(mapped);
+    const failed  = status === 'failed';
+
+    const dots = STAGES.map((stage, i) => {
+      let cls = '';
+      if (!failed) {
+        if (status === 'ready' || i < current) cls = 'done';
+        else if (i === current)                cls = 'active';
+      }
+      return `<span class="${cls}" title="${stage}"></span>`;
+    }).join('');
+
+    return `<div class="track">${dots}</div>`;
+  }
+
+
+  /* ── Colab handoff instructions ────────────────────────── */
+  function buildHandoff(job) {
+    return `
+      <div class="handoff">
+        COLMAP complete — choose GPU training method:<br><br>
+
+        <b>Option 1 — Local GPU</b><br>
+        <button class="link-btn primary-link"
+                onclick="trainLocalGPU('${job.job_id}')">
+          Start Local GPU Training
+        </button>
+
+        <br><br>
+
+        <b>Option 2 — Google Colab</b><br>
+        1. Run <code>python scripts/zip_for_colab.py ${job.job_id}</code><br>
+        2. Upload the zip to <code>notebooks/monosplat_colab_gpu.ipynb</code><br>
+        3. After downloading, place output files in
+        <code>work/${job.job_id}/models/gaussian/</code>
+      </div>`;
+  }
+
+
+  /* ── Local GPU training ────────────────────────────────── */
+  async function trainLocalGPU(jobId) {
+    try {
+      const res = await fetch(`/api/train-local/${jobId}`, {
+        method: 'POST'
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.detail || 'Training failed');
+      }
+
+      toast(
+        'Local GPU Training Started',
+        `Training started for ${jobId}`
+      );
+
+      await fetchJobs();
+
+    } catch (err) {
+      toast('Training Error', err.message, true);
+    }
+  }
+
+
+  /* ── Inline quality metrics ────────────────────────────── */
+  function buildMetrics(job) {
+    const items = [];
+    if (job.num_images    != null)
+      items.push(`<span class="metric">frames <b>${job.num_images}</b></span>`);
+    if (job.num_gaussians != null)
+      items.push(`<span class="metric">gaussians <b>${Number(job.num_gaussians).toLocaleString()}</b></span>`);
+    if (job.psnr          != null)
+      items.push(`<span class="metric">PSNR <b>${job.psnr} dB</b></span>`);
+    if (job.ssim          != null)
+      items.push(`<span class="metric">SSIM <b>${job.ssim}</b></span>`);
+    return items.length
+      ? `<div class="job-metrics">${items.join('')}</div>`
+      : '';
+  }
+
+
+  /* ── Header counters ───────────────────────────────────── */
+  function updateHeader() {
+    const ready   = jobs.filter(j => j.status === 'ready').length;
+    const handoff = jobs.filter(j => j.status === 'ready_for_colab').length;
+    const active  = jobs.filter(j => ACTIVE.includes(j.status)).length;
+
+    document.getElementById('hdr-ready').textContent   = `${ready} ready`;
+    document.getElementById('hdr-handoff').textContent = `${handoff} ready for GPU`;
+    document.getElementById('hdr-active').textContent  = `${active} active`;
+
+    document.getElementById('clear-failed-btn').style.display =
+      jobs.some(j => j.status === 'failed') ? 'inline-block' : 'none';
+    document.getElementById('clear-all-btn').style.display =
+      jobs.some(j => !ACTIVE.includes(j.status)) ? 'inline-block' : 'none';
+  }
+
+
+  /* ── Job management ────────────────────────────────────── */
+  async function deleteJob(jobId) {
+    try {
+      const res  = await fetch(`/api/jobs/${jobId}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Delete failed');
+      jobs = jobs.filter(j => j.job_id !== jobId);
+      renderJobs();
+    } catch (err) {
+      toast('Delete failed', err.message, true);
+    }
+  }
+
+  async function clearFailed() { await clearJobs('failed'); }
+  async function clearAll()    { await clearJobs('all'); }
+
+  async function clearJobs(mode) {
+    try {
+      const res  = await fetch(`/api/jobs?mode=${mode}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Clear failed');
+      toast('Cleared', `${data.cleared} job(s) removed.`);
+      await fetchJobs();
+    } catch (err) {
+      toast('Clear failed', err.message, true);
+    }
+  }
+
+
+  /* ── Toasts ────────────────────────────────────────────── */
+  function toast(title, message, isError = false) {
+    const wrap = document.getElementById('toasts');
+    const el   = document.createElement('div');
+    el.className = 'toast' + (isError ? ' err' : '');
+    el.innerHTML = `
+      <strong>${escapeHtml(title)}</strong>
+      <span>${escapeHtml(message || '')}</span>`;
+    wrap.appendChild(el);
+    setTimeout(() => {
+      el.style.opacity    = '0';
+      el.style.transition = 'opacity .25s';
+      setTimeout(() => el.remove(), 260);
+    }, 4500);
+  }
+
+
+  /* ── Utility ───────────────────────────────────────────── */
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>'"]/g, ch => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;',
+      "'": '&#39;', '"': '&quot;'
+    }[ch]));
+  }
+
+
+  /* ── Boot ──────────────────────────────────────────────── */
+  fetchJobs();
+  setInterval(fetchJobs, 10000);
+
 </script>
 </body>
 </html>

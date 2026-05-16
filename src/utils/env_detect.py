@@ -77,18 +77,19 @@ def should_use_gpu(colmap_binary: str = "colmap") -> bool:
 
     Rules (in priority order):
       1. Windows desktop                            → CPU (GPU SIFT often crashes)
-      2. If we're in Colab                          → CPU (OpenGL unstable)
-      3. If no OpenGL context detected              → CPU
-      4. If COLMAP wasn't built with CUDA           → CPU
-      5. Otherwise                                  → GPU
+      2. If COLMAP wasn't built with CUDA           → CPU
+      3. If no OpenGL context AND not in Colab      → CPU
+         (Colab: COLMAP ≥ 3.8 supports headless GPU extraction without OpenGL)
+      4. Otherwise                                  → GPU
     """
     if sys.platform == "win32":
         return False
-    if is_colab():
-        return False
-    if not has_opengl_context():
-        return False
     if not has_cuda_colmap(colmap_binary):
+        return False
+    # Colab: allow GPU extraction — COLMAP headless GPU SIFT works fine on T4/A100.
+    if is_colab():
+        return True
+    if not has_opengl_context():
         return False
     return True
 

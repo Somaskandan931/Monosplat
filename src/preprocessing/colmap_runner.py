@@ -191,9 +191,16 @@ def run_colmap(
         "--image_path",                      str(image_dir),
         "--ImageReader.camera_model",        camera_model,
         "--ImageReader.single_camera",       "1" if single_camera else "0",
+        # max_image_size=3200 supports portrait videos up to ~2200px tall
+        # (COLMAP default is 3200; explicit avoids platform overrides)
+        "--ImageReader.single_camera_per_folder", "0",
         "--SiftExtraction.max_num_features", "16000",
+        "--SiftExtraction.max_image_size",   "3200",
         "--SiftExtraction.peak_threshold",   "0.004",
         "--SiftExtraction.edge_threshold",   "10",
+        # first_octave=-1: extract features at sub-pixel scale — helps with
+        # small objects and high-res portrait videos (1238x2200, 1080x1920)
+        "--SiftExtraction.first_octave",     "-1",
     ]
     if use_extraction_gpu:
         extraction_cmd += ["--SiftExtraction.use_gpu", "1"]

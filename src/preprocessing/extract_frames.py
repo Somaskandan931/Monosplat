@@ -495,8 +495,8 @@ def extract_from_video(
         raise FileNotFoundError(f"Video not found: {video_path}")
 
     # ------------------ METADATA + ADAPTIVE FPS ------------------
-    SHORT_VIDEO_THRESHOLD = 20    # seconds — triggers high-density extraction
-    SHORT_VIDEO_MIN_FRAMES = 80   # minimum frames we want from a short video
+    SHORT_VIDEO_THRESHOLD = 25    # seconds — triggers high-density extraction
+    SHORT_VIDEO_MIN_FRAMES = 100  # minimum frames we want from a short video
 
     try:
         info     = get_video_info(str(video_path))
@@ -509,14 +509,20 @@ def extract_from_video(
             if is_short_video:
                 # Short video: extract aggressively — cap at native fps to avoid
                 # duplicate frames but aim for at least SHORT_VIDEO_MIN_FRAMES.
+                # For high-fps sources (60fps), cap target fps at 30 to avoid
+                # extracting near-duplicate frames (every 2 frames at 60fps).
+                effective_native = min(native_fps, 30.0)
                 desired_fps = max(SHORT_VIDEO_MIN_FRAMES / duration, 6.0)
-                fps = min(desired_fps, native_fps)
+                fps = min(desired_fps, effective_native)
                 fps = round(fps, 1)
                 print(
                     f"[extract] ⚡ SHORT VIDEO ({duration:.1f}s) — boosting to "
-                    f"{fps:.1f} fps (target ≥{SHORT_VIDEO_MIN_FRAMES} frames)"
+                    f"{fps:.1f} fps (target ≥{SHORT_VIDEO_MIN_FRAMES} frames, "
+                    f"native={native_fps:.1f} capped at {effective_native:.0f})"
                 )
             elif duration < 40:
+                # Medium duration: 4fps gives ~120-160 frames for 30-40s videos.
+                # For 60fps sources, still use 4fps (temporal decimation is fine).
                 fps = 4
             else:
                 fps = 3
@@ -541,7 +547,9 @@ def extract_from_video(
     # compat.  The if(gt(iw,ih),...) guard handles portrait video correctly —
     # the old `scale='max(iw,1280)':-2` form treated the height arg as a literal
     # string on some FFmpeg builds, producing 12px-wide frames.
-    _scale = "scale='if(gt(iw,ih),max(iw,1280),-2)':'if(gt(iw,ih),-2,max(ih,1280))'"
+    # Portrait-safe scale: longer side → ≥1280px, shorter side auto (-2=even).
+    # gte(iw,ih) handles square correctly; gt would misclassify squares as portrait.
+    _scale = "scale='if(gte(iw,ih),max(iw,1280),-2)':'if(gte(iw,ih),-2,max(ih,1280))'"
     if adaptive_sampling:
         vf_filter = f"select='gt(scene,0.02)',fps={fps},{_scale}"
         print("[extract] Using adaptive sampling")

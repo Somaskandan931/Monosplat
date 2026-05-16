@@ -84,11 +84,26 @@ class GaussianModel(nn.Module):
         self._rotations:     nn.Parameter = None
 
     # ------------------------------------------------------------------
+    # Convenience: current device of the model
+    # ------------------------------------------------------------------
+
+    @property
+    def device(self) -> torch.device:
+        """Return the device where model parameters currently live."""
+        if self._positions is not None:
+            return self._positions.device
+        return torch.device("cpu")
+
+    # ------------------------------------------------------------------
     # Initialisation
     # ------------------------------------------------------------------
 
     def create_from_points(self, positions: np.ndarray, colors: np.ndarray) -> None:
         n    = len(positions)
+        # Build all tensors on CPU first, then move to the model's current device
+        # (which may already be CUDA if .to(device) was called before this).
+        target_device = self.device
+
         pts  = torch.from_numpy(positions.astype(np.float32))
         cols = torch.from_numpy(colors.astype(np.float32))
 
@@ -106,14 +121,15 @@ class GaussianModel(nn.Module):
         rotations = torch.zeros(n, 4)
         rotations[:, 0] = 1.0
 
-        self._positions     = nn.Parameter(pts)
-        self._features_dc   = nn.Parameter(features_dc)
-        self._features_rest = nn.Parameter(features_rest)
-        self._opacities     = nn.Parameter(opacities)
-        self._scales        = nn.Parameter(log_scales)
-        self._rotations     = nn.Parameter(rotations)
+        # Move all tensors to the target device before wrapping as Parameters
+        self._positions     = nn.Parameter(pts.to(target_device))
+        self._features_dc   = nn.Parameter(features_dc.to(target_device))
+        self._features_rest = nn.Parameter(features_rest.to(target_device))
+        self._opacities     = nn.Parameter(opacities.to(target_device))
+        self._scales        = nn.Parameter(log_scales.to(target_device))
+        self._rotations     = nn.Parameter(rotations.to(target_device))
 
-        print(f"[GaussianModel] Initialised {n:,} Gaussians from point cloud.")
+        print(f"[GaussianModel] Initialised {n:,} Gaussians on {target_device} from point cloud.")
 
     # ------------------------------------------------------------------
     # 360GS-compatible properties
@@ -246,9 +262,10 @@ class GaussianModel(nn.Module):
             return
 
         stds  = scales_det[selected].repeat(N, 1)
-        means = torch.zeros_like(stds)
-        # Sample offsets along principal axes
-        samples = torch.normal(mean=means, std=stds)
+        means = torch.zeros_like(stds, device=stds.device)
+        # Sample offsets along principal axes — torch.normal creates on CPU by
+        # default, so explicitly call .to() to keep everything on the model device.
+        samples = torch.normal(mean=means, std=stds).to(stds.device)
 
         rots   = _build_rotation_matrix(self._rotations.detach()[selected]).repeat(N, 1, 1)
         pos_new = (rots @ samples.unsqueeze(-1)).squeeze(-1) + self._positions.detach()[selected].repeat(N, 1)
@@ -280,18 +297,15 @@ class GaussianModel(nn.Module):
 
     def load_state(self, state: Dict[str, np.ndarray]) -> None:
         self.create_from_points(state["positions"], state["colors"])
+        dev = self.device
         with torch.no_grad():
-            # Use .data.copy_() — the correct pattern for in-place parameter
-            # updates. .detach().copy_() works but is semantically misleading
-            # and can cause subtle autograd issues if the parameter is live
-            # in an optimizer's state dict.
             self._opacities.data.copy_(
-                inverse_sigmoid(torch.from_numpy(state["opacities"]).clamp(1e-6, 1 - 1e-6))
+                inverse_sigmoid(torch.from_numpy(state["opacities"]).clamp(1e-6, 1 - 1e-6)).to(dev)
             )
             self._scales.data.copy_(
-                torch.log(torch.from_numpy(state["scales"]).clamp(min=1e-7))
+                torch.log(torch.from_numpy(state["scales"]).clamp(min=1e-7)).to(dev)
             )
-            self._rotations.data.copy_(torch.from_numpy(state["rotations"]))
+            self._rotations.data.copy_(torch.from_numpy(state["rotations"]).to(dev))
 
     def __len__(self) -> int:
         if self._positions is None:

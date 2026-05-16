@@ -1,1 +1,53 @@
-{}
+{
+  "f0bdec2a7e62": {
+    "job_id": "f0bdec2a7e62",
+    "item_name": "vase",
+    "upload_dir": "uploads\\vase",
+    "work_dir": "work\\f0bdec2a7e62",
+    "status": "ready",
+    "progress": 100,
+    "message": "Training complete. Model ready to view.",
+    "ply_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.ply",
+    "splat_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.splat",
+    "thumbnail": null,
+    "num_images": 124,
+    "num_gaussians": 10000,
+    "error": null,
+    "created_at": "2026-05-16T11:34:21.132768",
+    "updated_at": "2026-05-16T12:02:28.000000"
+  },
+  "3770b6191f3f": {
+    "job_id": "3770b6191f3f",
+    "item_name": "vase",
+    "upload_dir": "uploads\\vase",
+    "work_dir": "work\\3770b6191f3f",
+    "status": "failed",
+    "progress": 0,
+    "message": "Pipeline failed \u2014 see server logs",
+    "ply_path": null,
+    "splat_path": null,
+    "thumbnail": null,
+    "num_images": 124,
+    "num_gaussians": 0,
+    "error": "COLMAP step 'Sparse Reconstruction (SfM)' failed with exit code 3221225786.\nCheck the log output above for details.",
+    "created_at": "2026-05-16T12:31:09.552166",
+    "updated_at": "2026-05-16T12:38:53.306286"
+  },
+  "5379ca1565f7": {
+    "job_id": "5379ca1565f7",
+    "item_name": "vase",
+    "upload_dir": "uploads\\vase",
+    "work_dir": "work\\5379ca1565f7",
+    "status": "failed",
+    "progress": 0,
+    "message": "Pipeline failed \u2014 see server logs",
+    "ply_path": null,
+    "splat_path": null,
+    "thumbnail": null,
+    "num_images": 124,
+    "num_gaussians": 0,
+    "error": "COLMAP step 'Sparse Reconstruction (SfM)' failed with exit code 3221225786.\nCheck the log output above for details.",
+    "created_at": "2026-05-16T12:39:03.836742",
+    "updated_at": "2026-05-16T12:53:34.137935"
+  }
+}

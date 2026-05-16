@@ -8,8 +8,8 @@ data:
   processed_dir: "data/processed"
   colmap_output_dir: "data/colmap_output"
   image_extensions: [".jpg", ".jpeg", ".png"]
-  video_fps: 5
-  max_frames: 200
+  video_fps: null  # null = adaptive (duration-based); set a number to override
+  max_frames: 600  # increased from 200 to match code default; 600 caps memory use
 
 colmap:
   binary_path: "colmap"
@@ -52,10 +52,10 @@ renderer:
 
 viewer:
   window_width: 800
-  window_height: 600
+  window_height: 800  # square avoids portrait/landscape crop distortion
   window_title: "MonoSplat Object Viewer"
   target_fps: 60
-  fov_degrees: 45.0          # Tighter FOV for objects
+  fov_degrees: 60.0          # Standard FOV; per-camera FOV overridden by from_colmap
   near_plane: 0.01
   far_plane: 100.0
   movement_speed: 0.05

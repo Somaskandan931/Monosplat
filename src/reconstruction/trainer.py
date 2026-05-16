@@ -128,7 +128,9 @@ class GaussianTrainer:
         on_iter_callback: Optional[Callable[[int, float], None]] = None,
         callback_every: int = 500,
     ) -> None:
-        torch.autograd.set_detect_anomaly(True)
+        torch.autograd.set_detect_anomaly(False)  # Keep OFF in production — 2x GPU overhead
+        if self.device == "cuda":
+            torch.backends.cudnn.benchmark = True   # Tune cuDNN kernels for fixed input sizes
 
         cfg        = self.cfg.training
         iterations = cfg.iterations

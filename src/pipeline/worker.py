@@ -187,7 +187,7 @@ def run_pipeline(
     has_gpu = has_torch_gpu()
     print(f"[worker] GPU available: {has_gpu}")
 
-    video_fps = getattr(cfg.data, "video_fps", 5)
+    video_fps = getattr(cfg.data, "video_fps", None)  # None = adaptive
     max_frames = getattr(cfg.data, "max_frames", 200)
     colmap_binary = getattr(cfg.colmap, "binary_path", colmap_binary)
     colmap_quality = getattr(cfg.colmap, "quality", "medium")
@@ -213,7 +213,7 @@ def run_pipeline(
             n_frames = extract_from_video(
                 str(input_path),
                 output_dir=str(frames_dir),
-                fps=float(video_fps),
+                fps=float(video_fps) if video_fps is not None else None,
                 max_frames=int(max_frames),
                 blur_threshold=80.0,
                 adaptive_sampling=False,
@@ -263,7 +263,7 @@ def run_pipeline(
         if input_path.is_file() and n_frames < 20:
             # fps=None (adaptive) produced too few frames — force a higher fixed fps.
             # Repeating the same adaptive call would yield the same result.
-            fps_retry = min(int(video_fps) + 2, 10)
+            fps_retry = min((int(video_fps) if video_fps is not None else 5) + 2, 10)
             print(f"[worker] WARN  Only {n_frames} frames — triggering re-extraction at fps={fps_retry}…")
             _set_stage(registry, job_id, "EXTRACTING", 12, f"Too few frames ({n_frames}) — re-extracting at fps={fps_retry}…")
             import shutil as _shutil
@@ -272,7 +272,7 @@ def run_pipeline(
             n_frames = extract_from_video(
                 str(input_path),
                 output_dir=str(frames_dir),
-                fps=fps_retry,
+                fps=float(fps_retry),
                 max_frames=int(max_frames),
                 blur_threshold=80.0,
                 adaptive_sampling=False,
@@ -466,8 +466,10 @@ def run_pipeline(
         _set_stage(registry, job_id, "TRAINING", 60, "Starting Gaussian Splat training on GPU…")
         t_train = time.time()
 
-        device = "cuda"
+        device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"[worker] Training device: {device}")
+        if device == "cuda":
+            torch.backends.cudnn.benchmark = True
 
         from src.preprocessing.utils import load_colmap_model
         cameras_colmap, images_colmap, points3d = load_colmap_model(str(text_model))
@@ -504,6 +506,9 @@ def run_pipeline(
         rgbs = np.array([p.rgb for p in points3d.values()], dtype=np.float32) / 255.0
 
         model = GaussianModel(sh_degree=cfg.renderer.sh_degree)
+        # Move to GPU *before* create_from_points so all tensors are
+        # allocated directly on the target device (avoids CPU→GPU copy).
+        model = model.to(device)
         model.create_from_points(xyzs, rgbs)
 
         # Item 5 (Gaussian): boost iterations when point cloud is sparse

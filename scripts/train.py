@@ -192,11 +192,16 @@ def main():
 
     # ── Initialise model ──────────────────────────────────────────────
     model = GaussianModel(sh_degree=args.sh_degree)
+    # Move model to GPU *before* create_from_points so all parameter
+    # tensors are allocated directly on the target device.
+    model = model.to(device)
     model.create_from_points(init_xyz, init_rgb)
 
     # ── Renderer ──────────────────────────────────────────────────────
     os.environ["PYTORCH_ALLOC_CONF"] = "expandable_segments:True"
-    torch.cuda.empty_cache() if device == "cuda" else None
+    if device == "cuda":
+        torch.cuda.empty_cache()
+        torch.backends.cudnn.benchmark = True
 
     renderer_obj = GaussianRenderer(
         width=cfg.viewer.window_width,

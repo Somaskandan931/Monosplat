@@ -169,6 +169,16 @@ class Camera:
 
         fov_deg = math.degrees(2.0 * math.atan(cam_data.height / (2.0 * fy)))
 
+        # Preserve the original camera aspect ratio when scaling into the viewer
+        # resolution.  For portrait videos (e.g. 1238×2200) the COLMAP model
+        # has a tall aspect; squishing into a fixed landscape viewer (800×600)
+        # produces severe camera distortion.  Instead, fit the image so its
+        # longer dimension maps to the viewer longer dimension, keeping the
+        # correct aspect ratio.
+        orig_w = max(cam_data.width,  1)
+        orig_h = max(cam_data.height, 1)
+        scale  = min(width / orig_w, height / orig_h)
+
         return cls(
             position    = position,
             width       = width,
@@ -176,10 +186,10 @@ class Camera:
             fov_deg     = fov_deg,
             near        = near,
             far         = far,
-            fx          = fx * (width  / max(cam_data.width,  1)),
-            fy          = fy * (height / max(cam_data.height, 1)),
-            cx          = cx * (width  / max(cam_data.width,  1)),
-            cy          = cy * (height / max(cam_data.height, 1)),
+            fx          = fx * scale,
+            fy          = fy * scale,
+            cx          = cx * scale,
+            cy          = cy * scale,
             view_matrix = view,
         )
 

@@ -122,15 +122,25 @@ class GaussianRenderer:
         width:    int = 800,
         height:   int = 600,
         bg_color: Union[List[float], Tuple[float, ...]] = (1.0, 1.0, 1.0),
-        device:   str = "cpu",
+        device:   str = "auto",
         batch_size: int = 5000,
         use_cuda_rasterizer: bool = True,
     ):
         self.width    = int(width)
         self.height   = int(height)
-        self.device   = device if torch.cuda.is_available() or device == "cpu" else "cpu"
-        self.bg_color = torch.tensor(list(bg_color), dtype=torch.float32, device=self.device)
         self.batch_size = batch_size
+
+        # Resolve device: "auto" → CUDA if available, else CPU.
+        # Explicit "cuda" with no GPU available gracefully falls back to CPU.
+        if device == "auto":
+            self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        elif device == "cuda" and not torch.cuda.is_available():
+            print("[Renderer] ⚠  CUDA requested but not available — falling back to CPU")
+            self.device = "cpu"
+        else:
+            self.device = device
+
+        self.bg_color = torch.tensor(list(bg_color), dtype=torch.float32, device=self.device)
 
         # Use CUDA rasterizer if available and requested
         self._use_cuda = (
@@ -145,7 +155,7 @@ class GaussianRenderer:
                 print("[Renderer] ⚠  diff-gaussian-rasterization not found — using software renderer")
                 print("             Install: pip install submodules/diff-gaussian-rasterization")
             else:
-                print("[Renderer] Using software renderer (CPU-compatible)")
+                print(f"[Renderer] Using software renderer ({self.device.upper()})")
 
     def render_torch(self, model, camera: Camera) -> torch.Tensor:
         if self._use_cuda:
