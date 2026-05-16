@@ -49,5 +49,22 @@
     "error": "COLMAP step 'Sparse Reconstruction (SfM)' failed with exit code 3221225786.\nCheck the log output above for details.",
     "created_at": "2026-05-16T12:39:03.836742",
     "updated_at": "2026-05-16T12:53:34.137935"
+  },
+  "01466fc52737": {
+    "job_id": "01466fc52737",
+    "item_name": "vase",
+    "upload_dir": "uploads\\vase",
+    "work_dir": "work\\01466fc52737",
+    "status": "extracting",
+    "progress": 5,
+    "message": "Extracting frames\u2026",
+    "ply_path": null,
+    "splat_path": null,
+    "thumbnail": null,
+    "num_images": 0,
+    "num_gaussians": 0,
+    "error": null,
+    "created_at": "2026-05-16T13:05:20.154486",
+    "updated_at": "2026-05-16T13:05:22.567137"
   }
 }

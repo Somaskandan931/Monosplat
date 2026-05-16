@@ -497,6 +497,171 @@ renderer:
   max_gaussians: 3000000
   sh_degree: 3
 ```
+---
+ 
+## What Local GPU Training Does
+ 
+After COLMAP finishes, MonoSplat needs a GPU to run **3D Gaussian Splatting (3DGS)**
+training — this is the step that turns the COLMAP point cloud into a viewable `.splat`
+and `.ply` file.
+ 
+The training script is:
+```
+scripts/train_local_gpu.py
+```
+ 
+Run it like this:
+```bash
+python scripts/train_local_gpu.py --job_id <job_id>
+```
+ 
+---
+ 
+## What You Need for Local Training
+ 
+### 1. CUDA-capable NVIDIA GPU
+Your GPU must support CUDA. The script auto-detects VRAM and picks a profile:
+ 
+| VRAM | GPU Examples | Iterations | Gaussians | Resolution | Est. Time |
+|------|-------------|------------|-----------|------------|-----------|
+| ≥ 20 GB | RTX 3090, 4090, A100 | 30,000 | 500,000 | 960×540 | ~20 min |
+| ≥ 8 GB | RTX 3070, 3080, 4070 | 15,000 | 200,000 | 800×450 | ~30 min |
+| ≥ 4 GB | RTX 3060, 2060, GTX 1650 | 7,000 | 80,000 | 640×360 | ~3–4 hrs* |
+| < 4 GB / CPU | Fallback | 1,000 | 10,000 | 480×270 | Very slow |
+ 
+*Without the CUDA rasterizer. With it: ~15–20 min.
+ 
+### 2. PyTorch with CUDA Support
+The standard PyTorch install is CPU-only. You need the CUDA build:
+ 
+```bash
+pip uninstall torch torchvision torchaudio -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+```
+ 
+Verify it worked:
+```bash
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+# Should print: True
+#               NVIDIA GeForce GTX 1650 (or your GPU)
+```
+ 
+### 3. diff-gaussian-rasterization (Optional but Important)
+This is a C++ CUDA extension that speeds up rendering **~100×**.
+Without it a software renderer is used and training takes hours instead of minutes.
+ 
+To install it you need:
+- **Visual Studio Build Tools** with "Desktop development with C++" workload
+  - Download from: `https://aka.ms/vs/17/release/vs_BuildTools.exe`
+- **CUDA Toolkit** matching your PyTorch CUDA version (12.1 recommended)
+  - Download from: `https://developer.nvidia.com/cuda-toolkit`
+- The `CUDA_HOME` environment variable pointing to your CUDA install
+Once those are set up:
+```bash
+cd D:\PycharmProjects
+git clone --recurse-submodules https://github.com/graphdeco-inria/diff-gaussian-rasterization
+cd diff-gaussian-rasterization
+python setup.py install
+```
+ 
+### 4. COLMAP and FFmpeg
+Both must be installed and on your PATH.
+ 
+| Tool | Required Version | Recommended |
+|------|-----------------|-------------|
+| COLMAP | 3.8+ | 3.13 ✓ |
+| FFmpeg | 4.x+ | 8.x ✓ |
+ 
+Install via conda if missing:
+```bash
+conda install -c conda-forge colmap ffmpeg
+```
+ 
+---
+ 
+## Known Issues on GTX 1650 (4 GB VRAM)
+ 
+### OOM during KNN initialization
+The original script computed an 80,000×80,000 distance matrix requiring ~25 GB RAM.
+This is fixed in the patched `train_local_gpu.py` — it uses a batched approach
+that processes 2,048 rows at a time (~640 MB peak).
+ 
+### CUDA not detected despite having an NVIDIA GPU
+This means PyTorch was installed without CUDA support (the default pip install).
+Fix: reinstall with the `--index-url https://download.pytorch.org/whl/cu121` flag above.
+ 
+### CUDA_HOME not set
+The rasterizer build needs to find your CUDA install:
+```powershell
+$env:CUDA_HOME = "C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.1"
+$env:PATH += ";$env:CUDA_HOME\bin"
+```
+ 
+---
+ 
+## Why Google Colab is Better for Most People
+ 
+Unless you have a high-end GPU (RTX 3080+) and the rasterizer installed,
+**Colab is the better choice**. Here's why:
+ 
+| Factor | Local GTX 1650 | Google Colab (T4/A100) |
+|--------|---------------|------------------------|
+| Training time | 3–4 hours (no rasterizer) | 10–20 minutes |
+| Setup required | CUDA toolkit, Build Tools, compiler | None |
+| Cost | Free (your hardware) | Free tier available |
+| VRAM | 4 GB | 16 GB (T4) / 40 GB (A100) |
+| Quality | Limited by VRAM | Full quality |
+| Reliability | Depends on your setup | Consistent |
+ 
+### How to use Colab
+ 
+When your job reaches `ready_for_colab` status in the UI:
+ 
+1. Zip the job folder:
+   ```bash
+   python scripts/zip_for_colab.py <job_id>
+   ```
+ 
+2. Upload the zip to the Colab notebook:
+   ```
+   notebooks/monosplat_colab_gpu.ipynb
+   ```
+ 
+3. Run all cells. After training finishes, download the output and place the files in:
+   ```
+   work/<job_id>/models/gaussian/
+   ```
+ 
+4. Update `models/registry.json` with the job's new status and file paths,
+   then restart the server to pick up the changes.
+---
+ 
+## Updating the Registry After Training
+ 
+The server loads `models/registry.json` once on startup into memory.
+Edits to the file are only picked up on restart.
+ 
+**Correct workflow:**
+1. Stop the server
+2. Edit `models/registry.json` — set `status` to `ready`, fill in `ply_path` and `splat_path`
+3. Restart the server
+Example entry after successful training:
+```json
+"f0bdec2a7e62": {
+  "status": "ready",
+  "progress": 100,
+  "message": "Training complete. Model ready to view.",
+  "ply_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.ply",
+  "splat_path": "D:\\PycharmProjects\\monosplat\\work\\f0bdec2a7e62\\models\\gaussian\\f0bdec2a7e62.splat",
+  "num_gaussians": 10000
+}
+```
+ 
+Then verify the API is returning the updated data:
+```powershell
+Invoke-RestMethod http://localhost:8000/api/jobs
+```
+ 
 
 ---
 
