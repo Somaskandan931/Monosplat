@@ -412,7 +412,7 @@ def train(args, cfg, profile: dict, device: str) -> tuple:
         bg_color=cfg.renderer.background_color,
         device=device,
         batch_size=BS,
-        use_cuda_rasterizer=getattr(cfg.renderer, "use_cuda_rasterizer", True),
+        use_gsplat=getattr(cfg.renderer, "use_gsplat", getattr(cfg.renderer, "use_cuda_rasterizer", True)),
     )
 
     # Trainer
