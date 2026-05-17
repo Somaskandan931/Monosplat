@@ -314,7 +314,7 @@ class GaussianRenderer:
                 sh_degree  = model.active_sh_degree,
                 near_plane = camera.near,
                 far_plane  = camera.far,
-                backgrounds = self.bg_color.unsqueeze(0),   # (1, 3)
+                backgrounds = self.bg_color,   # (3,) - gsplat will broadcast
                 packed     = True,   # memory-efficient packed mode
             )
             # render_colors: (1, H, W, 3) → (3, H, W)
@@ -332,7 +332,7 @@ class GaussianRenderer:
                 Ks       = Ks,
                 width    = camera.image_width,
                 height   = camera.image_height,
-                backgrounds = self.bg_color.unsqueeze(0),
+                backgrounds = self.bg_color,
             )
             return render_colors[0].permute(2, 0, 1).clamp(0, 1)
 
