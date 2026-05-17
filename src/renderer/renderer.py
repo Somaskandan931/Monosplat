@@ -285,30 +285,27 @@ class GaussianRenderer:
         Ks[0, 1, 2] = cy
         Ks[0, 2, 2] = 1.0
 
-        # Evaluate colours from SH coefficients for current view direction
+        # Pass SH coefficients to gsplat (gsplat rasterizer evaluates SH internally)
         sh_coeffs = model.get_features().to(self.device)  # (N, (deg+1)^2, 3)
-        cam_pos   = torch.from_numpy(camera.position).to(self.device, dtype=torch.float32)
-        view_dirs = F.normalize(positions - cam_pos.unsqueeze(0), dim=1)
-        colors    = _eval_sh(model.active_sh_degree, sh_coeffs, view_dirs)  # (N, 3)
-        colors    = colors.unsqueeze(0)  # gsplat expects batch shape: (1, N, 3)
+        colors = sh_coeffs.unsqueeze(0)  # batch shape: (1, N, (deg+1)^2, 3)
 
         try:
             # gsplat >= 1.0 unified API
             render_colors, render_alphas, meta = gs.rasterization(
-                means    = positions,
-                quats    = quats,
-                scales   = scales,
-                opacities= opacities,
-                colors   = colors,
-                viewmats = viewmat,
-                Ks       = Ks,
-                width    = camera.image_width,
-                height   = camera.image_height,
-                sh_degree= 0,   # SH already evaluated above; pass degree=0
-                near_plane  = camera.near,
-                far_plane   = camera.far,
+                means      = positions,
+                quats      = quats,
+                scales     = scales,
+                opacities  = opacities,
+                colors     = colors,
+                viewmats   = viewmat,
+                Ks         = Ks,
+                width      = camera.image_width,
+                height     = camera.image_height,
+                sh_degree  = model.active_sh_degree,
+                near_plane = camera.near,
+                far_plane  = camera.far,
                 backgrounds = self.bg_color.unsqueeze(0),   # (1, 3)
-                packed   = True,   # memory-efficient packed mode
+                packed     = True,   # memory-efficient packed mode
             )
             # render_colors: (1, H, W, 3) → (3, H, W)
             return render_colors[0].permute(2, 0, 1).clamp(0, 1)
