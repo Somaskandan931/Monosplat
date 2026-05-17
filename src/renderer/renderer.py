@@ -290,6 +290,7 @@ class GaussianRenderer:
         cam_pos   = torch.from_numpy(camera.position).to(self.device, dtype=torch.float32)
         view_dirs = F.normalize(positions - cam_pos.unsqueeze(0), dim=1)
         colors    = _eval_sh(model.active_sh_degree, sh_coeffs, view_dirs)  # (N, 3)
+        colors    = colors.unsqueeze(0)  # gsplat expects batch shape: (1, N, 3)
 
         try:
             # gsplat >= 1.0 unified API
