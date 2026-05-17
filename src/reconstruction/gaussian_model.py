@@ -27,18 +27,50 @@ def inverse_sigmoid(x: torch.Tensor) -> torch.Tensor:
     return torch.log(x / (1.0 - x))
 
 
-def _knn_mean_dist(pts: torch.Tensor, k: int = 3) -> torch.Tensor:
-    """Mean distance to k nearest neighbours."""
+def _knn_mean_dist(pts: torch.Tensor, k: int = 3, max_sample: int = 8192, chunk_size: int = 4096) -> torch.Tensor:
+    """Mean distance to k nearest neighbours.
+
+    For large point clouds this avoids allocating the full N x N distance
+    matrix by sampling a subset of points and assigning each original
+    point the mean-k distance of its nearest sampled neighbour. This
+    provides a good approximation of local density while keeping memory
+    use bounded.
+    """
     N = pts.shape[0]
     if N == 0:
         return torch.tensor([], device=pts.device)
     k_actual = min(k, N - 1)
     if k_actual == 0:
         return torch.zeros(N, device=pts.device)
-    dist_matrix = torch.cdist(pts, pts)
-    dist_matrix.fill_diagonal_(float('inf'))
-    knn_dists = torch.topk(dist_matrix, k=k_actual, largest=False, dim=1).values
-    return knn_dists.mean(dim=1).clamp(min=1e-7)
+
+    device = pts.device
+
+    # If the point cloud is small enough, compute exact pairwise distances
+    if N <= max_sample:
+        dist_matrix = torch.cdist(pts, pts)
+        dist_matrix.fill_diagonal_(float('inf'))
+        knn_dists = torch.topk(dist_matrix, k=k_actual, largest=False, dim=1).values
+        return knn_dists.mean(dim=1).clamp(min=1e-7)
+
+    # Otherwise: sample a subset, compute mean-k for the sample, then
+    # assign to all points the value of their nearest sample neighbour.
+    perm = torch.randperm(N, device=device)[:max_sample]
+    pts_sample = pts[perm]
+
+    dist_sample = torch.cdist(pts_sample, pts_sample)
+    dist_sample.fill_diagonal_(float('inf'))
+    knn_sample = torch.topk(dist_sample, k=k_actual, largest=False, dim=1).values
+    mean_sample = knn_sample.mean(dim=1).clamp(min=1e-7)  # (M,)
+
+    # For memory safety, compute distances from full set to sample in chunks
+    mean_all = torch.empty(N, device=device, dtype=mean_sample.dtype)
+    for i in range(0, N, chunk_size):
+        j = min(i + chunk_size, N)
+        d = torch.cdist(pts[i:j], pts_sample)  # (chunk, M)
+        idx = d.argmin(dim=1)
+        mean_all[i:j] = mean_sample[idx]
+
+    return mean_all
 
 
 def _build_rotation_matrix(rotations: torch.Tensor) -> torch.Tensor:
