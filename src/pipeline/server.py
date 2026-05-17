@@ -732,6 +732,274 @@ async def get_training_preview(job_id: str):
 # Inline 3D viewer
 # ---------------------------------------------------------------------------
 
+# Standalone viewer (simplified, works without external dependencies)
+@app.get("/viewer-simple/{job_id}", response_class=HTMLResponse)
+async def simple_splat_viewer(job_id: str):
+    """Simplified viewer that works without @mkkellogg/gaussian-splats-3d."""
+    job = manager.get_registry().get_job(job_id)
+    if not job:
+        raise HTTPException(404, f"Job not found: {job_id}")
+
+    if job.status == "ready_for_colab":
+        return HTMLResponse(
+            f"""<!DOCTYPE html><html><head><title>{job.item_name}</title>
+            <style>body{{font-family:monospace;background:#0a0c0f;color:#c8d0dc;padding:2rem;text-align:center}}
+            h1{{color:#f5b84b}}code{{background:#111418;padding:0.5rem 1rem;border-radius:4px}}</style></head>
+            <body><h1>Ready for GPU Training</h1>
+            <p>Run: <code>python scripts/zip_for_colab.py {job_id}</code></p>
+            <p><a href="/" style="color:#00e5a0">Back to portal</a></p></body></html>"""
+        )
+
+    splat_file = Path(job.splat_path) if job.splat_path else None
+    if not splat_file or not splat_file.exists():
+        return HTMLResponse(
+            f"""<!DOCTYPE html><html><body style="font-family:monospace;background:#0a0c0f;color:#c8d0dc;padding:2rem;text-align:center">
+            <h2 style="color:#f5b84b">Splat not ready</h2>
+            <p>Status: <code>{job.status}</code></p>
+            <p><a href="/" style="color:#00e5a0">Back to portal</a></p></body></html>"""
+        )
+
+    splat_url = f"/splat/{job_id}"
+    return HTMLResponse(f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{job.item_name} — MonoSplat</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{background:#0a0a0a;color:#e0e0e0;font-family:system-ui,sans-serif;overflow:hidden;height:100vh}}
+#canvas{{width:100%;height:100%}}
+#loading{{position:fixed;inset:0;background:#0a0a0a;display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:1000}}
+#loading.hidden{{opacity:0;pointer-events:none;transition:opacity 0.5s}}
+.loading-title{{font-size:24px;font-weight:700;color:#00ff88;margin-bottom:20px}}
+.loading-bar{{width:300px;height:4px;background:#1a1a1a;border-radius:2px;overflow:hidden;margin-bottom:16px}}
+.loading-bar-fill{{height:100%;width:0%;background:linear-gradient(90deg,#00ff88,#00b4ff);border-radius:2px;transition:width 0.3s}}
+.loading-text{{font-size:12px;color:#666;font-family:monospace}}
+#toolbar{{position:fixed;top:0;left:0;right:0;height:56px;background:rgba(10,10,10,0.9);display:flex;align-items:center;justify-content:space-between;padding:0 20px;z-index:100;border-bottom:1px solid #1a1a1a;display:none}}
+.toolbar-title{{font-size:16px;font-weight:600}}
+.toolbar-badge{{font-size:11px;padding:3px 8px;background:rgba(0,255,136,0.15);color:#00ff88;border-radius:4px;font-family:monospace;margin-left:12px}}
+.btn{{height:32px;padding:0 12px;border:1px solid #2a2a2a;border-radius:4px;background:rgba(255,255,255,0.05);color:#aaa;font-size:12px;cursor:pointer;display:flex;align-items:center;gap:6px}}
+.btn:hover{{background:rgba(255,255,255,0.1);color:#fff}}
+.btn.primary{{background:rgba(0,255,136,0.15);color:#00ff88;border-color:rgba(0,255,136,0.3)}}
+#fps{{position:fixed;top:64px;right:20px;font-size:12px;font-family:monospace;color:#666;z-index:100;display:none}}
+#error{{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(255,50,50,0.15);border:1px solid rgba(255,50,50,0.3);color:#ff6b6b;padding:12px 24px;border-radius:8px;font-size:14px;z-index:200;display:none}}
+</style>
+</head>
+<body>
+<div id="loading">
+<div class="loading-title">{job.item_name}</div>
+<div class="loading-bar"><div class="loading-bar-fill" id="bar"></div></div>
+<div class="loading-text" id="load-text">Loading splat data...</div>
+</div>
+<div id="toolbar">
+<div style="display:flex;align-items:center">
+<span class="toolbar-title">{job.item_name}</span>
+<span class="toolbar-badge" id="count">—</span>
+</div>
+<div style="display:flex;gap:8px">
+<button class="btn" onclick="resetCam()">🔄 Reset</button>
+<button class="btn" onclick="toggleFS()">⛶ Fullscreen</button>
+<a class="btn primary" href="{splat_url}" download>↓ Download</a>
+<a class="btn" href="/">← Portal</a>
+</div>
+</div>
+<div id="fps">0 FPS</div>
+<div id="error"></div>
+<canvas id="canvas"></canvas>
+<script type="importmap">
+{{"imports":{{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}}}
+</script>
+<script type="module">
+import * as THREE from 'three';
+import {{ OrbitControls }} from 'three/addons/controls/OrbitControls.js';
+
+const SPLAT_SIZE = 32;
+let scene, camera, renderer, controls, points;
+let autoRotate = false;
+
+function init() {{
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x0a0a0a);
+  
+  camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.01, 1000);
+  camera.position.set(0, 0, 5);
+  
+  renderer = new THREE.WebGLRenderer({{ canvas: document.getElementById('canvas'), antialias: true }});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  
+  controls = new OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.05;
+  
+  window.addEventListener('resize', onResize);
+  window.addEventListener('keydown', e => {{
+    if (e.key === 'r' || e.key === 'R') resetCam();
+    if (e.key === 'f' || e.key === 'F') toggleFS();
+    if (e.key === ' ') {{ e.preventDefault(); autoRotate = !autoRotate; controls.autoRotate = autoRotate; }}
+  }});
+  
+  animate();
+}}
+
+function onResize() {{
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}}
+
+function resetCam() {{
+  if (!points) return;
+  const b = points.userData.bounds;
+  camera.position.set(b.c[0], b.c[1] - b.r*1.5, b.c[2] + b.r*2.5);
+  controls.target.set(...b.c);
+  controls.update();
+}}
+
+function toggleFS() {{
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+}}
+
+function setBar(pct, text) {{
+  document.getElementById('bar').style.width = pct + '%';
+  document.getElementById('load-text').textContent = text;
+}}
+
+function showError(msg) {{
+  const el = document.getElementById('error');
+  el.textContent = msg;
+  el.style.display = 'block';
+  setTimeout(() => el.style.display = 'none', 5000);
+}}
+
+async function loadSplat() {{
+  try {{
+    setBar(10, 'Downloading splat file...');
+    const resp = await fetch('{splat_url}');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    
+    const contentLength = parseInt(resp.headers.get('content-length') || '0');
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let received = 0;
+    
+    while (true) {{
+      const {{ done, value }} = await reader.read();
+      if (done) break;
+      chunks.push(value);
+      received += value.length;
+      const pct = 10 + Math.round((received / Math.max(contentLength, received)) * 40);
+      setBar(pct, `Loading... ${{(received/1024/1024).toFixed(1)}} MB`);
+    }}
+    
+    const buffer = new Uint8Array(received);
+    let offset = 0;
+    for (const chunk of chunks) {{ buffer.set(chunk, offset); offset += chunk.length; }}
+    
+    setBar(55, 'Parsing splat data...');
+    const numSplats = Math.floor(buffer.length / SPLAT_SIZE);
+    
+    if (numSplats === 0) throw new Error('No splats found in file');
+    
+    const positions = new Float32Array(numSplats * 3);
+    const colors = new Float32Array(numSplats * 3);
+    
+    // Compute bounds while parsing
+    let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity,minZ=Infinity,maxZ=-Infinity;
+    
+    for (let i = 0; i < numSplats; i++) {{
+      const o = i * SPLAT_SIZE;
+      const dv = new DataView(buffer.buffer, o, 12);
+      const x = dv.getFloat32(0, true);
+      const y = dv.getFloat32(4, true);
+      const z = dv.getFloat32(8, true);
+      positions[i*3] = x; positions[i*3+1] = y; positions[i*3+2] = z;
+      
+      if (x<minX)minX=x; if(x>maxX)maxX=x;
+      if (y<minY)minY=y; if(y>maxY)maxY=y;
+      if (z<minZ)minZ=z; if(z>maxZ)maxZ=z;
+      
+      // Color from RGBA bytes
+      colors[i*3] = buffer[o+24]/255;
+      colors[i*3+1] = buffer[o+25]/255;
+      colors[i*3+2] = buffer[o+26]/255;
+    }}
+    
+    const center = [(minX+maxX)/2, (minY+maxY)/2, (minZ+maxZ)/2];
+    const radius = Math.max(maxX-minX, maxY-minY, maxZ-minZ)/2 || 1;
+    
+    setBar(80, 'Creating point cloud...');
+    
+    if (points) {{ scene.remove(points); points.geometry.dispose(); points.material.dispose(); }}
+    
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    
+    const material = new THREE.PointsMaterial({{
+      size: radius * 0.02,
+      vertexColors: true,
+      transparent: true,
+      opacity: 0.8,
+      sizeAttenuation: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    }});
+    
+    points = new THREE.Points(geometry, material);
+    points.userData = {{ bounds: {{ c: center, r: radius }} }};
+    scene.add(points);
+    
+    camera.position.set(center[0], center[1] - radius*1.5, center[2] + radius*2.5);
+    controls.target.set(...center);
+    controls.update();
+    
+    setBar(100, 'Ready!');
+    document.getElementById('count').textContent = `${{numSplats.toLocaleString()}} gaussians`;
+    
+    setTimeout(() => {{
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('toolbar').style.display = 'flex';
+      document.getElementById('fps').style.display = 'block';
+    }}, 300);
+    
+    // FPS counter
+    let frames = 0, lastTime = performance.now();
+    function countFPS() {{
+      frames++;
+      const now = performance.now();
+      if (now - lastTime >= 1000) {{
+        document.getElementById('fps').textContent = frames + ' FPS';
+        frames = 0; lastTime = now;
+      }}
+      requestAnimationFrame(countFPS);
+    }}
+    countFPS();
+    
+    console.log(`[Viewer] Loaded ${{numSplats.toLocaleString()}} splats`);
+    
+  }} catch (err) {{
+    console.error(err);
+    showError('Failed to load: ' + err.message);
+    setBar(0, 'Error: ' + err.message);
+  }}
+}}
+
+function animate() {{
+  requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}}
+
+init();
+loadSplat();
+</script>
+</body>
+</html>''')
+
+
 @app.get("/viewer/{job_id}", response_class=HTMLResponse)
 async def splat_viewer(job_id: str):
     job = manager.get_registry().get_job(job_id)

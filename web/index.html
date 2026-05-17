@@ -1061,7 +1061,9 @@
 
     const readyActions = status === 'ready'
       ? `<a class="link-btn primary-link" href="/viewer/${job.job_id}"
-            target="_blank" rel="noopener">Open viewer</a>
+            target="_blank" rel="noopener">Open viewer (full)</a>
+         <a class="link-btn" href="/viewer-simple/${job.job_id}"
+            target="_blank" rel="noopener">Open viewer (simple)</a>
          <button class="share-btn" onclick="shareScene('${job.job_id}', this)" title="Copy shareable link">&#8599; Share</button>
          <a class="link-btn" href="/splat/${job.job_id}" download>&#8595; .splat</a>
          <a class="link-btn" href="/spz/${job.job_id}"  download>&#8595; .spz</a>
