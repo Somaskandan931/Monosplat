@@ -286,8 +286,18 @@ class GaussianRenderer:
         Ks[0, 2, 2] = 1.0
 
         # Pass SH coefficients to gsplat (gsplat rasterizer evaluates SH internally)
-        sh_coeffs = model.get_features().to(self.device)  # (N, (deg+1)^2, 3)
-        colors = sh_coeffs.unsqueeze(0)  # batch shape: (1, N, (deg+1)^2, 3)
+        sh_coeffs = model.get_features().to(self.device)  # (N, K, 3) expected
+        # Handle edge case where get_features() returns (N, 3) instead of (N, K, 3)
+        # This can happen with certain model initialization paths
+        if sh_coeffs.dim() == 2:
+            # DC-only case: reshape (N, 3) -> (N, 1, 3)
+            sh_coeffs = sh_coeffs.unsqueeze(1)
+        elif sh_coeffs.dim() != 3:
+            raise ValueError(
+                f"Expected get_features() to return (N, K, 3) or (N, 3), "
+                f"got shape {sh_coeffs.shape} with {sh_coeffs.dim()} dimensions"
+            )
+        colors = sh_coeffs.unsqueeze(0)  # batch shape: (1, N, K, 3)
 
         try:
             # gsplat >= 1.0 unified API
@@ -340,6 +350,9 @@ class GaussianRenderer:
 
         positions = model.positions.to(device)
         colors_sh = model.colors_sh.to(device)
+        # Ensure colors_sh has shape (N, K, 3) - handle case where it's (N, 3)
+        if colors_sh.dim() == 2:
+            colors_sh = colors_sh.unsqueeze(1)
         opacities = model.opacities.to(device)
         scales    = model.scales.to(device)
         rotations = model.rotations.to(device)

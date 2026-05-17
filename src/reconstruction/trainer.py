@@ -45,6 +45,9 @@ def _eval_sh_colors(model, positions, camera_position, device):
     """Evaluate SH colours for current view direction."""
     from ..renderer.renderer import _eval_sh, SH_C0
     sh_coeffs = model.get_features().to(device)
+    # Ensure sh_coeffs has shape (N, K, 3) - handle case where it's (N, 3)
+    if sh_coeffs.dim() == 2:
+        sh_coeffs = sh_coeffs.unsqueeze(1)
     cam_pos   = torch.from_numpy(camera_position).to(device, dtype=torch.float32)
     view_dirs = F.normalize(positions - cam_pos.unsqueeze(0), dim=1)
     return _eval_sh(model.active_sh_degree, sh_coeffs, view_dirs)
@@ -311,6 +314,9 @@ class GaussianTrainer:
         view_dirs = F.normalize(positions - cam_pos.unsqueeze(0), dim=1)
         from ..renderer.renderer import _eval_sh
         sh_coeffs = self.model.get_features().to(self.device)
+        # Ensure sh_coeffs has shape (N, K, 3) - handle case where it's (N, 3)
+        if sh_coeffs.dim() == 2:
+            sh_coeffs = sh_coeffs.unsqueeze(1)
         colors    = _eval_sh(self.model.active_sh_degree, sh_coeffs, view_dirs)
 
         fx = torch.tensor(camera.fx, device=self.device, dtype=torch.float32)
