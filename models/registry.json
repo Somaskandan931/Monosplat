@@ -1,27 +1,4 @@
 {
-  "2e9c989b96ce": {
-    "job_id": "2e9c989b96ce",
-    "item_name": "vase",
-    "upload_dir": "uploads\\vase",
-    "work_dir": "work\\2e9c989b96ce",
-    "status": "failed",
-    "progress": 0,
-    "message": "Pipeline failed \u2014 see server logs",
-    "ply_path": null,
-    "splat_path": null,
-    "thumbnail": null,
-    "num_images": 124,
-    "num_gaussians": 0,
-    "error": "[enforce fail at alloc_cpu.cpp:114] data. DefaultCPUAllocator: not enough memory: you tried to allocate 63901772944 bytes.",
-    "created_at": "2026-05-17T11:28:29.091339",
-    "updated_at": "2026-05-17T11:51:44.486668",
-    "scene_notes": "",
-    "tags": [],
-    "warnings": [],
-    "cloud_urls": {},
-    "ai_detections": 0,
-    "ai_results": {}
-  },
   "ad7016737754": {
     "job_id": "ad7016737754",
     "item_name": "vase",
