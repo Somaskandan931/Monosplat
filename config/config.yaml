@@ -1,6 +1,6 @@
 project:
-  name: "MonoSplat — Object / Product / Architecture Mode"
-  version: "2.0.0"
+  name: "MonoSplat — Video to 3D Gaussian Splat"
+  version: "3.0.0"
   mode: "object"   # object | scene | panoramic
 
 data:
@@ -8,62 +8,106 @@ data:
   processed_dir: "data/processed"
   colmap_output_dir: "data/colmap_output"
   image_extensions: [".jpg", ".jpeg", ".png"]
-  video_fps: null  # null = adaptive (duration-based); set a number to override
-  max_frames: 600  # increased from 200 to match code default; 600 caps memory use
+  video_fps: null      # null = adaptive (duration-based); override with a number
+  max_frames: 600      # caps memory during frame extraction
 
 colmap:
   binary_path: "colmap"
-  quality: "medium"         # low / medium / high — README default
-  camera_model: "OPENCV"
-  single_camera: true
+  quality: "medium"        # low / medium / high
+  camera_model: "OPENCV"   # OPENCV handles radial distortion well for phone video
+  single_camera: true      # phone video: one camera, one lens model
 
 training:
   output_dir: "models/gaussian"
   checkpoint_dir: "models/checkpoints"
-  # ── Matches 360GS defaults ──────────────────────────────────────
+  # ── gsplat-compatible hyperparameters ──────────────────────────────────────
+  # gsplat uses the same schedule as the original 3DGS paper with improvements.
   iterations: 30000
-  iterations_cpu: 1000
+  iterations_cpu: 1000      # hard cap when running without GPU
   save_every: 5000
-  eval_every: 1000          # compute PSNR/SSIM on test set every N iters
+  eval_every: 1000          # compute PSNR/SSIM on held-out cameras
+
   learning_rate:
-    position: 0.00016
-    feature: 0.0025
-    opacity: 0.05
-    scaling: 0.005
-    rotation: 0.001
-    position_final: 0.0000016   # exponential decay target (360GS uses 100x reduction)
-  # ── Densification schedule (360GS: 500→15000, every 100 iters) ─
-  densify_from_iter: 500
-  densify_until_iter: 15000
-  densification_interval: 100
-  opacity_reset_interval: 3000
-  # ── Object-mode specific ────────────────────────────────────────
-  percent_dense: 0.01        # Gaussians larger than 1% of scene_extent get split
-  densify_grad_threshold: 0.0002  # 360GS default (your code used 0.0001)
-  lambda_dssim: 0.2          # weight of SSIM in combined loss (360GS default)
+    position:       0.00016
+    feature:        0.0025
+    opacity:        0.05
+    scaling:        0.005
+    rotation:       0.001
+    position_final: 0.0000016   # exponential decay target (100× reduction)
+
+  # ── Densification schedule ─────────────────────────────────────────────────
+  densify_from_iter:        500
+  densify_until_iter:       15000
+  densification_interval:   100
+  opacity_reset_interval:   3000
+
+  # ── Gaussian control ───────────────────────────────────────────────────────
+  percent_dense:            0.01      # Gaussians > 1% of scene extent are split
+  densify_grad_threshold:   0.0002    # 3DGS / gsplat default
+  lambda_dssim:             0.2       # weight of SSIM in combined loss
 
 renderer:
-  background_color: [1.0, 1.0, 1.0]  # White bg — better for object evaluation
-  sh_degree: 3               # Full SH degree for objects (360GS uses 3)
-  max_gaussians: 1000000     # 360GS allows up to 1M for detailed objects
-  # CUDA rasterizer settings (used when diff-gaussian-rasterization is installed)
-  use_cuda_rasterizer: true
-  batch_size: 5000           # software fallback batch size
+  # gsplat rasterizer settings
+  background_color: [1.0, 1.0, 1.0]  # white bg — better for object evaluation
+  sh_degree: 3                         # full SH for best view-dependent appearance
+  max_gaussians: 1000000               # 1M cap — browser-safe for gsplat .splat files
+
+  # Software fallback (used when gsplat CUDA is unavailable)
+  batch_size: 5000
 
 viewer:
+  # Resolution used for training renders — square avoids portrait/landscape crop
   window_width: 800
-  window_height: 800  # square avoids portrait/landscape crop distortion
-  window_title: "MonoSplat Object Viewer"
+  window_height: 800
   target_fps: 60
-  fov_degrees: 60.0          # Standard FOV; per-camera FOV overridden by from_colmap
+  fov_degrees: 60.0
   near_plane: 0.01
   far_plane: 100.0
-  movement_speed: 0.05
-  mouse_sensitivity: 0.003
-  show_fps: true
-  show_controls: true
 
 output:
   renders_dir: "outputs/renders"
   logs_dir: "outputs/logs"
   videos_dir: "outputs/videos"
+
+# ── Cloud Storage (Stage 5) ─────────────────────────────────────────────────────
+# Enable true cloud deployment with S3/GCS integration
+cloud_storage:
+  enabled: false  # Set to true to enable cloud storage uploads
+  
+  # Storage backend: "s3" | "gcs" | "local"
+  type: "local"
+  
+  # S3 configuration (for type: "s3")
+  s3:
+    bucket: "monosplat-jobs"
+    region: "us-east-1"
+    # Optional: provide credentials directly (not recommended for production)
+    # aws_access_key_id: ""
+    # aws_secret_access_key: ""
+  
+  # GCS configuration (for type: "gcs")
+  gcs:
+    bucket: "monosplat-jobs"
+    # Optional: path to service account JSON
+    # credentials_path: "/path/to/credentials.json"
+  
+  # Local fallback configuration (for type: "local")
+  local:
+    path: "cloud_storage"
+
+# ── AI Layer (Stage 7) ───────────────────────────────────────────────────────────
+# Enable intelligent scene understanding
+ai_layer:
+  enabled: false  # Set to true to enable AI features
+  
+  # Object detection model
+  detection_model: "yolov8n.pt"  # yolov8n.pt, yolov8s.pt, yolov8m.pt, yolov8l.pt
+  
+  # Semantic segmentation model
+  segmentation_model: "facebook/sam-vit-base"
+  
+  # Scene QA model
+  qa_model: "gpt2"  # gpt2, gpt2-medium, gpt2-large
+  
+  # Confidence threshold for object detection
+  detection_confidence: 0.5

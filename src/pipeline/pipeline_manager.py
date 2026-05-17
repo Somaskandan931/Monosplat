@@ -58,6 +58,16 @@ class ModelJob:
     error:         Optional[str] = None
     created_at:    str       = field(default_factory=lambda: datetime.now().isoformat())
     updated_at:    str       = field(default_factory=lambda: datetime.now().isoformat())
+    # Scene metadata — user-editable via PUT /api/jobs/{job_id}/meta
+    scene_notes:   str       = ""
+    tags:          list      = field(default_factory=list)
+    # Capture quality warnings (Stage 1)
+    warnings:      list      = field(default_factory=list)
+    # Cloud storage URLs (Stage 5)
+    cloud_urls:    dict      = field(default_factory=dict)
+    # AI Layer results (Stage 7)
+    ai_detections: int       = 0
+    ai_results:    dict      = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         d = asdict(self)

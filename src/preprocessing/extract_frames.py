@@ -1,4 +1,4 @@
-﻿"""
+"""
 extract_frames.py
 Extract frames from a video file using FFmpeg, or copy a folder of images.
 
@@ -14,7 +14,8 @@ ADAPTIVE PIPELINE:
 """
 
 __all__ = ["extract_from_video", "copy_images", "validate_images", "validate_image_resolution",
-           "get_video_info", "filter_low_feature_frames", "filter_blurry_images", "estimate_motion"]
+           "get_video_info", "filter_low_feature_frames", "filter_blurry_images", "estimate_motion",
+           "validate_exposure"]
 
 import json
 import os
@@ -268,6 +269,75 @@ def filter_blurry_images(image_dir: str, threshold: float = 80.0) -> int:
     if kept < 15:
         print("[extract] ⚠  WARNING: Very few sharp frames! Try recording in better light.")
     return kept
+
+
+def validate_exposure(image_dir: str, overexposed_thresh: float = 245.0,
+                      underexposed_thresh: float = 10.0,
+                      bad_ratio_limit: float = 0.3) -> dict:
+    """
+    Detect frames with exposure problems (over- or under-exposed).
+
+    Returns a summary dict with counts and a human-readable warning message.
+    Frames are not removed — this is a diagnostic/advisory function only.
+
+    Args:
+        image_dir:           Directory of extracted frames.
+        overexposed_thresh:  Mean pixel value above which a frame is flagged (0–255).
+        underexposed_thresh: Mean pixel value below which a frame is flagged.
+        bad_ratio_limit:     Fraction of flagged frames that triggers a warning.
+
+    Returns:
+        dict with keys: total, overexposed, underexposed, ok, warning (str or None)
+    """
+    try:
+        import cv2
+    except ImportError:
+        return {"total": 0, "overexposed": 0, "underexposed": 0, "ok": 0, "warning": None}
+
+    frames = _image_files(Path(image_dir))
+    total  = len(frames)
+    if total == 0:
+        return {"total": 0, "overexposed": 0, "underexposed": 0, "ok": 0, "warning": None}
+
+    overexposed   = 0
+    underexposed  = 0
+
+    for p in frames:
+        img = cv2.imread(str(p), cv2.IMREAD_GRAYSCALE)
+        if img is None:
+            continue
+        mean = float(img.mean())
+        if mean >= overexposed_thresh:
+            overexposed += 1
+        elif mean <= underexposed_thresh:
+            underexposed += 1
+
+    bad_total = overexposed + underexposed
+    ok        = total - bad_total
+    warning   = None
+
+    if bad_total / max(total, 1) > bad_ratio_limit:
+        parts = []
+        if overexposed > 0:
+            parts.append(f"{overexposed} overexposed (blown-out highlights)")
+        if underexposed > 0:
+            parts.append(f"{underexposed} underexposed (too dark)")
+        warning = (
+            f"[extract] ⚠  Exposure warning: {', '.join(parts)} out of {total} frames. "
+            "Lock camera exposure before recording to avoid COLMAP failures."
+        )
+        print(warning)
+    else:
+        print(f"[extract] Exposure check: {ok}/{total} frames OK, "
+              f"{overexposed} over, {underexposed} under.")
+
+    return {
+        "total":        total,
+        "overexposed":  overexposed,
+        "underexposed": underexposed,
+        "ok":           ok,
+        "warning":      warning,
+    }
 
 
 # ---------------------------------------------------------------------------

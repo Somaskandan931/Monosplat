@@ -1,47 +1,74 @@
-# Core
-torch>=2.0.0
-torchvision>=0.15.0
+# ── Core ──────────────────────────────────────────────────────────────────────
+torch>=2.1.0
+torchvision>=0.16.0
 numpy>=1.24.0
 
-# Image / Video
-# NOTE: FFmpeg handles video extraction — install FFmpeg separately:
+# ── Image / Video ──────────────────────────────────────────────────────────────
+# FFmpeg handles video extraction — install separately:
 #   Ubuntu:  sudo apt install ffmpeg
 #   macOS:   brew install ffmpeg
 #   Windows: https://ffmpeg.org/download.html
 Pillow>=9.5.0
 imageio>=2.31.0
-opencv-python>=4.8.0   # motion estimation, blur/feature filters (Stage 1)
+opencv-python>=4.8.0       # motion estimation, blur/feature filters, AI Layer
 
-# 3D / Math
+# ── 3D / Math ─────────────────────────────────────────────────────────────────
 scipy>=1.10.0
-plyfile>=0.8.1   # Required for RealityScan PLY point cloud → points3D.txt conversion
+plyfile>=0.8.1             # PLY point cloud I/O
 
-# Web Server (browser viewer — no OpenGL needed)
+# ── gsplat — modern Gaussian Splatting training (replaces raw CUDA extension) ─
+# gsplat provides optimised CUDA rasterisation kernels AND a clean Python API.
+# It is the nerfstudio-project's actively-maintained successor to the original
+# diff-gaussian-rasterization extension and is the recommended training backend.
+#
+#   pip install gsplat
+#   (CUDA wheel built automatically; CPU-only fallback available)
+#
+# https://github.com/nerfstudio-project/gsplat
+gsplat>=1.0.0
+
+# ── Quality metrics ───────────────────────────────────────────────────────────
+pytorch-msssim>=0.2.1      # fast SSIM / MS-SSIM on GPU
+lpips>=0.1.4               # perceptual quality metric (optional but recommended)
+
+# ── Web Server ────────────────────────────────────────────────────────────────
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 python-multipart>=0.0.6
 aiofiles>=23.0.0
 
-# Config & Utilities
+# ── Cloud Storage (Stage 5) ───────────────────────────────────────────────────────
+# AWS S3 support (optional)
+boto3>=1.28.0
+# Google Cloud Storage support (optional)
+google-cloud-storage>=2.10.0
+
+# ── AI Layer (Stage 7) ───────────────────────────────────────────────────────────
+# Object detection
+ultralytics>=8.0.0
+# Semantic segmentation
+# segment-anything  # Install from: https://github.com/facebookresearch/segment-anything
+# Transformers for QA
+transformers>=4.30.0
+
+# ── Config & Utilities ────────────────────────────────────────────────────────
 PyYAML>=6.0
 tqdm>=4.65.0
 rich>=13.0.0
 
-# Notebook (Colab training)
+# ── Notebook (Colab training) ─────────────────────────────────────────────────
 jupyter>=1.0.0
 matplotlib>=3.7.0
 
-# ── External tools (install separately) ───────────────────────────────────
+# ── External tools (install separately) ───────────────────────────────────────
+#
+# COLMAP — SfM camera pose estimation (Stage 2)
+#   Ubuntu:  sudo apt install colmap
+#   macOS:   brew install colmap
+#   Windows: https://github.com/colmap/colmap/releases
+#   Or build from source: https://github.com/colmap/colmap
 #
 # FFmpeg — frame extraction (Stage 1)
 #   Ubuntu:  sudo apt install ffmpeg
 #   macOS:   brew install ffmpeg
 #   Windows: https://ffmpeg.org/download.html
-#
-# RealityScan / RealityCapture — SfM pose estimation (Stage 2)
-#   Download: https://www.capturingreality.com/
-#   Free tier available; add CLI binary to PATH or set realityscan.binary_path in config.yaml
-#
-# Lichtfeld — Gaussian Splat training (Stage 3, GPU)
-#   Runs via the included trainer.py on Colab T4 GPU.
-#   No separate install required — uses the src/ package in this repo.

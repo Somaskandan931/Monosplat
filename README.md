@@ -2,6 +2,7 @@
 
 > Single-camera 3D Gaussian Splat reconstruction pipeline — record a video,
 > run COLMAP for camera alignment, train with PyTorch on GPU, view the 3D splat in your browser.
+> **Now with AI-powered scene understanding, XR support, and cloud storage integration.**
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.0+-orange)
@@ -9,6 +10,7 @@
 ![FFmpeg](https://img.shields.io/badge/FFmpeg-required-red)
 ![COLMAP](https://img.shields.io/badge/COLMAP-3.8+-purple)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
+![Status](https://img.shields.io/badge/Status-God%20Mode-success)
 
 ---
 
@@ -21,6 +23,8 @@ no OpenGL setup required.
 ```
 Video Input  →  Frame Extraction  →  Camera Poses  →  Gaussian Training  →  Browser Viewer
    MP4/MOV         FFmpeg              COLMAP (SfM)     PyTorch (GPU)          Three.js
+                    ↓                   ↓               ↓                    ↓
+              Quality Warnings    Cloud Upload    AI Analysis         XR Features
 ```
 
 ### Pipeline Stack
@@ -31,6 +35,10 @@ Video Input  →  Frame Extraction  →  Camera Poses  →  Gaussian Training  �
 | Camera alignment (SfM) | **COLMAP** | Geometry-based, real camera poses from real captured video |
 | Gaussian Splat training | **Custom PyTorch** | GPU-accelerated, high-quality 3D Gaussian output |
 | Browser viewer | **Three.js** | Zero-install, cross-platform, real-time |
+| Quality validation | **OpenCV + Custom** | Blur, motion, and exposure detection |
+| Cloud storage | **S3/GCS/Local** | Persistent scene storage and sharing |
+| AI Layer | **YOLO + SAM + Transformers** | Object detection, segmentation, QA |
+| XR Features | **WebXR + Three.js** | VR/AR mode, measurements, collaboration |
 
 This pipeline is:
 - ✔ Geometry-based (real camera poses, not neural approximations)
@@ -132,6 +140,253 @@ a new training run. This is fundamental to the technology, not a limitation of t
 7.  Training completes → .splat and .ply written to work/<job_id>/models/gaussian/
 8.  Update models/registry.json, restart server
 9.  View at http://localhost:8000/viewer/<job_id>
+```
+
+---
+
+## 🚀 Quick Start (Execution Guide)
+
+### 1. Install Dependencies
+
+```bash
+# Install Python dependencies
+pip install -r requirements.txt
+
+# Install PyTorch with CUDA support (required for GPU training)
+pip uninstall torch torchvision torchaudio -y
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Verify CUDA is working
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
+```
+
+### 2. Install External Tools
+
+```bash
+# FFmpeg (required for frame extraction)
+# Ubuntu:  sudo apt install ffmpeg
+# macOS:   brew install ffmpeg
+# Windows: https://ffmpeg.org/download.html
+
+# COLMAP (required for SfM pose estimation)
+# Ubuntu:  sudo apt install colmap
+# macOS:   brew install colmap
+# Windows: https://github.com/colmap/colmap/releases
+```
+
+### 3. Configure the Project
+
+Edit `config/config.yaml` to enable/disable features:
+
+```yaml
+# Enable cloud storage (Stage 5)
+cloud_storage:
+  enabled: false  # Set to true to enable S3/GCS uploads
+  type: "local"   # "s3", "gcs", or "local"
+
+# Enable AI Layer (Stage 7)
+ai_layer:
+  enabled: false  # Set to true to enable AI analysis
+  detection_model: "yolov8n.pt"
+```
+
+### 4. Start the Server
+
+```bash
+uvicorn src.pipeline.server:app --reload --port 8000
+```
+
+### 5. Upload and Process
+
+1. Open browser to `http://localhost:8000`
+2. Upload your video (MP4/MOV, 20-90 seconds recommended)
+3. The pipeline runs automatically:
+   - Frame extraction with quality validation
+   - COLMAP pose estimation
+   - Gaussian training (GPU required)
+   - AI analysis (if enabled)
+   - Cloud upload (if enabled)
+4. View the 3D scene in the browser viewer
+
+### 6. Use XR Features
+
+In the viewer, use these controls:
+- **🥽 VR** - Enter VR mode (requires WebXR-compatible headset)
+- **📱 AR** - Enter AR mode (mobile device with WebXR support)
+- **📏 Measure** - Click two points to measure distance (T key)
+- **⚡ Teleport** - Shift+Click to teleport camera
+- **👥 Collab** - Enable collaborative viewing mode
+- **R** - Reset camera
+- **F** - Fullscreen
+- **H** - Toggle controls
+- **M** - Toggle metrics
+- **A** - Toggle annotations
+
+---
+
+## 🎯 God Mode Features (New in v3.0)
+
+### Stage 1: Capture Quality Warnings
+
+The pipeline now analyzes your video during frame extraction and warns about quality issues:
+
+- **Motion detection**: Warns if camera movement is too fast or too slow
+- **Exposure validation**: Detects overexposed and underexposed frames
+- **Blur filtering**: Identifies and removes blurry frames
+
+Warnings appear in the job card as a yellow banner with specific recommendations.
+
+**Configuration:**
+```yaml
+# Blur threshold (default: 80.0)
+# Higher = more permissive, Lower = stricter
+```
+
+### Stage 2: WebXR VR/AR Mode
+
+The viewer now supports WebXR for immersive VR and AR experiences.
+
+**VR Mode:**
+- Click the "🥽 VR" button or press **V**
+- Requires a WebXR-compatible headset (Meta Quest, HTC Vive, etc.)
+- Full 6DOF tracking with hand controller support
+
+**AR Mode:**
+- Click the "📱 AR" button
+- Requires a mobile device with WebXR support
+- Place 3D scenes in your real environment
+
+### Stage 3: Progressive Chunk Loading
+
+Large scenes are now loaded progressively for faster initial viewing:
+
+- Scenes with >10,000 Gaussians are automatically chunked
+- Chunks load in order of importance (coarse LOD first)
+- Fallback to monolithic loading if chunks unavailable
+- Real-time progress indicator during loading
+
+**Configuration:**
+```yaml
+# Chunk size (default: 50,000 splats per chunk)
+# Adjust based on your network bandwidth
+```
+
+### Stage 4: SPZ Compression
+
+Compressed splat format for efficient storage and transfer:
+
+- `.spz` files are automatically generated alongside `.splat`
+- Significant size reduction with minimal quality loss
+- Download `.spz` from the viewer for compressed storage
+
+### Stage 5: Cloud Storage Integration
+
+Upload scenes to cloud storage for persistence and sharing:
+
+**Supported backends:**
+- **AWS S3** - Set `type: "s3"` in config
+- **Google Cloud Storage** - Set `type: "gcs"` in config
+- **Local filesystem** - Set `type: "local"` (default)
+
+**Configuration:**
+```yaml
+cloud_storage:
+  enabled: true
+  type: "s3"
+  s3:
+    bucket: "monosplat-jobs"
+    region: "us-east-1"
+    aws_access_key_id: "YOUR_KEY"  # Optional, use IAM roles in production
+    aws_secret_access_key: "YOUR_SECRET"
+```
+
+**Usage:**
+After enabling, all completed jobs are automatically uploaded to cloud storage. Cloud URLs are stored in the job metadata for easy sharing.
+
+### Stage 6: Full XR Features
+
+Enhanced viewer with professional XR capabilities:
+
+**Measurement Tool:**
+- Click "📏 Measure" or press **T**
+- Click two points in the scene
+- Distance is displayed in scene units
+- Useful for architectural and product visualization
+
+**Teleport Navigation:**
+- Click "⚡ Teleport" to enable
+- Shift+Click anywhere to teleport camera
+- Quick navigation in large scenes
+
+**Collaborative Viewing:**
+- Click "👥 Collab" to enable
+- Camera positions sync across multiple viewers (requires WebSocket server)
+- Great for remote collaboration and presentations
+
+**Keyboard Shortcuts:**
+- **V** - Enter VR mode
+- **T** - Toggle measurement tool
+- **C** - Toggle collaborative mode
+- **R** - Reset camera
+- **F** - Fullscreen
+- **H** - Toggle controls HUD
+- **M** - Toggle metrics panel
+- **A** - Toggle annotations
+- **Space** - Toggle auto-rotate
+
+### Stage 7: AI Layer
+
+Intelligent scene understanding powered by modern AI models:
+
+**Object Detection:**
+- Automatically detects objects in your scene (using YOLO)
+- Identifies common objects: chairs, tables, bottles, plants, etc.
+- Detection count displayed in job metrics
+
+**Semantic Segmentation:**
+- Pixel-level scene understanding (using SAM)
+- Identifies distinct regions and objects
+- Useful for scene editing and analysis
+
+**Spatial Search:**
+- Query scenes by object class: "Find all chairs"
+- Natural language search: "Find wooden objects"
+- Spatial queries: "Find objects near position (x,y,z)"
+
+**Scene QA:**
+- Ask natural language questions about your scene
+- Examples:
+  - "What objects are in this scene?"
+  - "How many chairs are visible?"
+  - "Describe the lighting conditions"
+
+**Configuration:**
+```yaml
+ai_layer:
+  enabled: true
+  detection_model: "yolov8n.pt"  # yolov8n.pt, yolov8s.pt, yolov8m.pt
+  segmentation_model: "facebook/sam-vit-base"
+  qa_model: "gpt2"
+  detection_confidence: 0.5
+```
+
+**API Endpoints:**
+```bash
+# Get AI results for a job
+GET /api/jobs/{job_id}/ai
+
+# Query the scene
+POST /api/jobs/{job_id}/ai/query
+{
+  "query": "chair",
+  "query_type": "class"  # "class", "description", "nearby"
+}
+
+# Ask a question
+POST /api/jobs/{job_id}/ai/qa
+{
+  "question": "What objects are in this scene?"
+}
 ```
 
 ---
@@ -713,6 +968,13 @@ Downstream effect of CUDA not being available.
 | Google Colab GPU training notebook | ✅ done |
 | Unified YAML config | ✅ done |
 | Pipeline documentation | ✅ done |
+| **Stage 1: Capture quality warnings (blur, motion, exposure)** | ✅ done |
+| **Stage 2: WebXR VR/AR mode** | ✅ done |
+| **Stage 3: Progressive chunk loading** | ✅ done |
+| **Stage 4: SPZ compression** | ✅ done |
+| **Stage 5: Cloud storage (S3/GCS/Local)** | ✅ done |
+| **Stage 6: Full XR features (measure, teleport, collab)** | ✅ done |
+| **Stage 7: AI Layer (detection, segmentation, QA)** | ✅ done |
 
 ---
 

@@ -272,51 +272,6 @@
     .tip   { color: var(--soft); font-size: 13px; line-height: 1.45; }
     .tip b { color: var(--text); }
 
-    /* ── Capture quality guide ──────────────────────────────────────── */
-    .capture-guide {
-      margin-top: 20px;
-      background: var(--panel-2);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 16px 18px;
-      animation: slide-in 0.2s ease;
-    }
-    @keyframes slide-in {
-      from { opacity: 0; transform: translateY(-6px); }
-      to   { opacity: 1; transform: translateY(0); }
-    }
-    .cg-header {
-      display: flex; align-items: center; gap: 10px;
-      margin-bottom: 12px;
-    }
-    .cg-icon   { font-size: 16px; }
-    .cg-header strong { flex: 1; font-size: 13px; color: var(--text); }
-    .cg-close  {
-      background: none; border: none; color: var(--muted);
-      font-size: 14px; cursor: pointer; padding: 2px 6px; line-height: 1;
-    }
-    .cg-close:hover { color: var(--text); }
-    .cg-checks { display: flex; flex-direction: column; gap: 8px; }
-    .cg-row {
-      display: flex; align-items: flex-start; gap: 10px;
-      font-size: 12px; line-height: 1.45;
-    }
-    .cg-dot {
-      width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0;
-      margin-top: 3px;
-    }
-    .cg-dot.ok   { background: var(--brand); box-shadow: 0 0 6px rgba(33,209,159,0.5); }
-    .cg-dot.warn { background: var(--warn); }
-    .cg-dot.bad  { background: var(--bad); }
-    .cg-dot.info { background: var(--blue); }
-    .cg-label  { color: var(--soft); flex: 1; }
-    .cg-label b { color: var(--text); }
-    .cg-tip {
-      margin-top: 12px; font-size: 11px; color: var(--muted);
-      border-top: 1px solid var(--line); padding-top: 10px;
-      line-height: 1.55; font-style: italic;
-    }
-
     /* ── Compat note ─────────────────────────────────────────────────── */
     .compat-note {
       margin-top: 20px;
@@ -362,43 +317,6 @@
       background: var(--panel);
       padding: 16px;
       margin-bottom: 12px;
-    }
-
-    /* ── Warnings banner ─────────────────────────────────────────────── */
-    .warnings-banner {
-      margin-top: 10px;
-      padding: 10px 14px;
-      background: rgba(245,184,75,.08);
-      border: 1px solid rgba(245,184,75,.35);
-      border-radius: var(--radius);
-      color: var(--warn);
-      font-size: 12px;
-      line-height: 1.45;
-    }
-    .warnings-banner.error {
-      background: rgba(239,91,107,.08);
-      border-color: rgba(239,91,107,.35);
-      color: var(--bad);
-    }
-    .warnings-banner strong {
-      display: block;
-      margin-bottom: 6px;
-      font-weight: 700;
-    }
-    .warning-item {
-      margin-top: 4px;
-      padding-left: 12px;
-      position: relative;
-    }
-    .warning-item::before {
-      content: '⚠';
-      position: absolute;
-      left: 0;
-      color: var(--warn);
-    }
-    .warnings-banner.error .warning-item::before {
-      content: '✕';
-      color: var(--bad);
     }
     .job-top {
       display: flex;
@@ -472,24 +390,6 @@
     .job-actions    { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
     .link-btn,
     .job-actions button { padding: 9px 11px; font-size: 12px; }
-
-    /* ── Training preview image ──────────────────────────────── */
-    .training-preview {
-      margin-top: 10px;
-      border-radius: 6px; overflow: hidden;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      position: relative;
-    }
-    .training-preview::before {
-      content: 'LIVE PREVIEW';
-      position: absolute; top: 6px; left: 6px;
-      font-size: 9px; letter-spacing: 0.15em;
-      color: var(--brand); background: rgba(0,0,0,0.6);
-      padding: 2px 6px; border-radius: 3px; font-family: var(--mono);
-      z-index: 1;
-    }
-
     .primary-link {
       background: rgba(33,209,159,.12);
       border-color: rgba(33,209,159,.35);
@@ -508,52 +408,6 @@
       line-height: 1.7;
     }
     code { font-family: var(--mono); color: var(--brand); }
-
-    /* ── Upload progress ──────────────────────────────────────────────── */
-    .upload-progress {
-      display: none;
-      margin-top: 14px;
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: var(--radius);
-      padding: 14px 16px;
-    }
-    .upload-progress.show { display: block; }
-    .up-label {
-      display: flex;
-      justify-content: space-between;
-      font-size: 12px;
-      color: var(--muted);
-      margin-bottom: 8px;
-      font-family: var(--mono);
-    }
-    .up-label span { color: var(--brand); font-weight: 600; }
-    .up-bar { height: 4px; background: #1d2634; border-radius: 999px; overflow: hidden; }
-    .up-bar-fill {
-      height: 100%; width: 0%;
-      background: linear-gradient(90deg, var(--blue), var(--brand));
-      border-radius: 999px; transition: width .2s ease;
-    }
-
-    /* ── Thumbnail in job card ────────────────────────────────────────── */
-    .job-thumb {
-      width: 72px; height: 48px; border-radius: 5px;
-      object-fit: cover; border: 1px solid var(--line);
-      flex-shrink: 0; background: var(--panel-2);
-    }
-    .job-top-inner { display: flex; align-items: flex-start; gap: 10px; flex: 1; }
-    .job-meta      { flex: 1; min-width: 0; }
-
-    /* ── Share button ──────────────────────────────────────────────────── */
-    .share-btn {
-      padding: 9px 11px; font-size: 12px;
-      border: 1px solid var(--line); border-radius: 6px;
-      background: var(--panel-2); color: var(--muted);
-      cursor: pointer; font: 700 12px var(--sans);
-      transition: background .18s, border-color .18s, color .18s;
-    }
-    .share-btn:hover { border-color: var(--brand); color: var(--brand); }
-    .share-btn.copied { border-color: var(--brand); color: var(--brand); background: rgba(33,209,159,.08); }
 
     /* ── Toasts ──────────────────────────────────────────────────────── */
     #toasts {
@@ -605,9 +459,6 @@
     <span class="pill" id="hdr-ready">0 ready</span>
     <span class="pill" id="hdr-handoff">0 ready for GPU</span>
     <span class="pill" id="hdr-active">0 active</span>
-    <a href="/capture-guide" target="_blank" rel="noopener"
-       style="border:1px solid var(--line);border-radius:999px;padding:7px 11px;color:var(--brand);font-size:12px;font-family:var(--mono);background:rgba(33,209,159,.06);text-decoration:none;white-space:nowrap"
-       title="How to film for great reconstructions">📷 Capture Guide</a>
   </div>
 </header>
 
@@ -709,15 +560,6 @@
       <button class="submit-btn" id="submit-btn" type="button" disabled>
         Upload and start pipeline
       </button>
-
-      <!-- Upload progress -->
-      <div class="upload-progress" id="upload-progress">
-        <div class="up-label">
-          <span>Uploading…</span>
-          <span id="up-pct">0%</span>
-        </div>
-        <div class="up-bar"><div class="up-bar-fill" id="up-fill"></div></div>
-      </div>
     </div>
 
     <!-- Shooting tips -->
@@ -741,19 +583,6 @@
         One continuous slow orbit works best. High-framerate sources (60 fps) are
         automatically downsampled — no manual adjustment needed.
       </div>
-    </div>
-
-    <!-- Capture quality guide -->
-    <div class="capture-guide" id="capture-guide" style="display:none">
-      <div class="cg-header">
-        <span class="cg-icon">🎯</span>
-        <strong>Capture Quality Check</strong>
-        <button class="cg-close" id="cg-close" aria-label="Dismiss">✕</button>
-      </div>
-      <div class="cg-checks" id="cg-checks">
-        <!-- populated by JS -->
-      </div>
-      <div class="cg-tip" id="cg-tip"></div>
     </div>
 
     <!-- Compat note -->
@@ -879,7 +708,6 @@
     }
 
     updateSubmit();
-    showCaptureGuide(file);
   }
 
   function clearFile() {
@@ -888,7 +716,6 @@
     selectedEl.classList.remove('show');
     fileWarn.classList.remove('show');
     dropzone.style.display = '';
-    hideCaptureGuide();
     updateSubmit();
   }
 
@@ -906,60 +733,34 @@
 
 
   /* ── Upload ────────────────────────────────────────────── */
-  const uploadProgress = document.getElementById('upload-progress');
-  const upFill         = document.getElementById('up-fill');
-  const upPct          = document.getElementById('up-pct');
-
-  submitBtn.addEventListener('click', () => {
+  submitBtn.addEventListener('click', async () => {
     if (!selectedFile || !sceneInput.value.trim()) return;
 
     submitBtn.disabled    = true;
     submitBtn.textContent = 'Uploading…';
-    uploadProgress.classList.add('show');
-    upFill.style.width = '0%';
-    upPct.textContent  = '0%';
 
     const fd = new FormData();
     fd.append('item_name', sceneInput.value.trim());
     fd.append('files',     selectedFile);
 
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/upload');
+    try {
+      const res  = await fetch('/upload', { method: 'POST', body: fd });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Upload failed');
 
-    xhr.upload.addEventListener('progress', e => {
-      if (!e.lengthComputable) return;
-      const pct = Math.round((e.loaded / e.total) * 100);
-      upFill.style.width = pct + '%';
-      upPct.textContent  = pct + '%';
-    });
+      toast('Upload complete', `${data.item_name} is queued.`);
+      clearFile();
+      sceneInput.value = '';
+      updateSubmit();
+      await fetchJobs();
+      subscribeSSE(data.job_id);
 
-    xhr.addEventListener('load', async () => {
-      uploadProgress.classList.remove('show');
-      try {
-        const data = JSON.parse(xhr.responseText);
-        if (xhr.status >= 400) throw new Error(data.detail || 'Upload failed');
-        toast('Upload complete', `${data.item_name} is queued.`);
-        clearFile();
-        sceneInput.value = '';
-        updateSubmit();
-        await fetchJobs();
-        subscribeSSE(data.job_id);
-      } catch (err) {
-        toast('Upload failed', err.message, true);
-      } finally {
-        submitBtn.textContent = 'Upload and start pipeline';
-        updateSubmit();
-      }
-    });
-
-    xhr.addEventListener('error', () => {
-      uploadProgress.classList.remove('show');
-      toast('Upload failed', 'Network error — check your connection.', true);
+    } catch (err) {
+      toast('Upload failed', err.message, true);
+    } finally {
       submitBtn.textContent = 'Upload and start pipeline';
       updateSubmit();
-    });
-
-    xhr.send(fd);
+    }
   });
 
 
@@ -979,14 +780,6 @@
       else          jobs.unshift(data);
 
       renderJobs();
-
-      // Refresh training preview image (bust cache) when training is active
-      if (data.status === 'training') {
-        const prevEl = document.querySelector(`#prev-${jobId} img`);
-        if (prevEl) {
-          prevEl.src = `/api/jobs/${jobId}/preview?t=${Date.now()}`;
-        }
-      }
 
       if (data.done || TERMINAL.includes(data.status)) {
         es.close();
@@ -1050,31 +843,11 @@
     const progress = Math.max(0, Math.min(100, job.progress || 0));
     const canDelete = !ACTIVE.includes(status);
 
-    // Thumbnail — show if available (ready or training preview)
-    const thumbSrc = (status === 'ready' && job.thumbnail)
-      ? `/thumbnails/${job.job_id}`
-      : (status === 'training' ? `/api/jobs/${job.job_id}/preview?t=${Date.now()}` : '');
-    const thumbHtml = thumbSrc
-      ? `<img class="job-thumb" src="${thumbSrc}" alt="Scene preview"
-              onerror="this.style.display='none'" loading="lazy">`
-      : '';
-
     const readyActions = status === 'ready'
       ? `<a class="link-btn primary-link" href="/viewer/${job.job_id}"
             target="_blank" rel="noopener">Open viewer</a>
-         <button class="share-btn" onclick="shareScene('${job.job_id}', this)" title="Copy shareable link">&#8599; Share</button>
-         <a class="link-btn" href="/splat/${job.job_id}" download>&#8595; .splat</a>
-         <a class="link-btn" href="/spz/${job.job_id}"  download>&#8595; .spz</a>
-         <a class="link-btn" href="/ply/${job.job_id}"  download>&#8595; .ply</a>`
-      : '';
-
-    const trainingPreview = (status === 'training')
-      ? `<div class="training-preview" id="prev-${job.job_id}">
-           <img src="/api/jobs/${job.job_id}/preview?t=${Date.now()}"
-                alt="Training preview" loading="lazy"
-                onerror="this.parentElement.style.display='none'"
-                style="width:100%;border-radius:4px;margin-top:8px;display:block">
-         </div>`
+         <a class="link-btn" href="/splat/${job.job_id}" download>Download .splat</a>
+         <a class="link-btn" href="/ply/${job.job_id}"   download>Download .ply</a>`
       : '';
 
     const deleteAction = canDelete
@@ -1083,12 +856,9 @@
 
     card.innerHTML = `
       <div class="job-top">
-        <div class="job-top-inner">
-          ${thumbHtml}
-          <div class="job-meta">
-            <div class="job-title">${escapeHtml(job.item_name || job.job_id)}</div>
-            <div class="job-time">${created}</div>
-          </div>
+        <div>
+          <div class="job-title">${escapeHtml(job.item_name || job.job_id)}</div>
+          <div class="job-time">${created}</div>
         </div>
         <span class="badge b-${status}">${status.replaceAll('_', ' ')}</span>
       </div>
@@ -1101,11 +871,7 @@
 
       ${job.error ? `<div class="error">${escapeHtml(job.error)}</div>` : ''}
 
-      ${job.warnings && job.warnings.length ? buildWarnings(job.warnings) : ''}
-
       ${buildMetrics(job)}
-
-      ${trainingPreview}
 
       ${status === 'ready_for_colab' ? buildHandoff(job) : ''}
 
@@ -1195,29 +961,9 @@
       items.push(`<span class="metric">PSNR <b>${job.psnr} dB</b></span>`);
     if (job.ssim          != null)
       items.push(`<span class="metric">SSIM <b>${job.ssim}</b></span>`);
-    if (job.ai_detections != null && job.ai_detections > 0)
-      items.push(`<span class="metric" style="color:var(--brand2)">AI <b>${job.ai_detections} objects</b></span>`);
     return items.length
       ? `<div class="job-metrics">${items.join('')}</div>`
       : '';
-  }
-
-
-  /* ── Warnings banner (Stage 1) ─────────────────────────── */
-  function buildWarnings(warnings) {
-    if (!warnings || !warnings.length) return '';
-    
-    const hasError = warnings.some(w => w.severity === 'error');
-    const bannerClass = hasError ? 'warnings-banner error' : 'warnings-banner';
-    
-    const items = warnings.map(w =>
-      `<div class="warning-item">${escapeHtml(w.message)}</div>`
-    ).join('');
-    
-    return `<div class="${bannerClass}">
-      <strong>Capture Quality Warnings</strong>
-      ${items}
-    </div>`;
   }
 
 
@@ -1290,113 +1036,6 @@
       '&': '&amp;', '<': '&lt;', '>': '&gt;',
       "'": '&#39;', '"': '&quot;'
     }[ch]));
-  }
-
-
-
-
-  /* ── Capture quality guide ──────────────────────────────── */
-  const captureGuideEl = document.getElementById('capture-guide');
-  const cgChecksEl     = document.getElementById('cg-checks');
-  const cgTipEl        = document.getElementById('cg-tip');
-  document.getElementById('cg-close').addEventListener('click', hideCaptureGuide);
-
-  function hideCaptureGuide() {
-    if (captureGuideEl) captureGuideEl.style.display = 'none';
-  }
-
-  function showCaptureGuide(file) {
-    if (!captureGuideEl) return;
-    const checks = [];
-    const tips   = [];
-
-    // Size-based duration estimate
-    const bytesPerSec = 8e6 / 8;
-    const estSec = Math.round(file.size / bytesPerSec);
-    const sizeMB = file.size / 1e6;
-
-    // Duration check
-    if (estSec >= 20 && estSec <= 90) {
-      checks.push({ status: 'ok',   label: `<b>Duration</b> — estimated ~${estSec}s (ideal: 20–90s)` });
-    } else if (estSec < 10) {
-      checks.push({ status: 'bad',  label: `<b>Duration too short</b> — estimated ~${estSec}s. Longer videos yield more frames and better coverage.` });
-      tips.push('Record at least 20 seconds with a slow, continuous orbit.');
-    } else if (estSec > 120) {
-      checks.push({ status: 'warn', label: `<b>Duration may be too long</b> — ~${estSec}s. Consider trimming to 30–60s to speed up COLMAP.` });
-      tips.push('Very long videos slow down COLMAP. Trim to 30–60s for best speed.');
-    } else {
-      checks.push({ status: 'warn', label: `<b>Duration</b> — estimated ~${estSec}s (aim for 30–60s)` });
-    }
-
-    // File size check
-    if (sizeMB > 500) {
-      checks.push({ status: 'warn', label: `<b>File size large</b> — ${sizeMB.toFixed(0)} MB. Uploads may be slow on limited connections.` });
-      tips.push('Compressing to H.264 MP4 before upload will significantly speed things up.');
-    } else {
-      checks.push({ status: 'ok',   label: `<b>File size</b> — ${sizeMB.toFixed(1)} MB ✓` });
-    }
-
-    // Format check
-    const ext = file.name.split('.').pop().toLowerCase();
-    const goodExts = ['mp4', 'mov', 'avi', 'mkv', 'webm'];
-    if (['mp4', 'mov'].includes(ext)) {
-      checks.push({ status: 'ok',   label: `<b>Format</b> — .${ext} (optimal)` });
-    } else if (goodExts.includes(ext)) {
-      checks.push({ status: 'info', label: `<b>Format</b> — .${ext} (supported, but MP4/MOV preferred)` });
-    } else {
-      checks.push({ status: 'bad',  label: `<b>Format .${ext}</b> — may not be supported. Use MP4 or MOV.` });
-      tips.push('Re-export as H.264 MP4 for guaranteed compatibility with FFmpeg.');
-    }
-
-    // General capture advice
-    checks.push({ status: 'info', label: '<b>Motion blur</b> — Ensure slow movement. Fast panning degrades COLMAP accuracy.' });
-    checks.push({ status: 'info', label: '<b>Lighting</b> — Lock exposure before recording. Avoid windows in background.' });
-    checks.push({ status: 'info', label: '<b>Coverage</b> — Orbit fully around subject with 60–80% frame overlap.' });
-
-    // Build HTML
-    cgChecksEl.innerHTML = checks.map(c =>
-      `<div class="cg-row">
-        <div class="cg-dot ${c.status}"></div>
-        <div class="cg-label">${c.label}</div>
-      </div>`
-    ).join('');
-
-    if (tips.length) {
-      cgTipEl.textContent = '💡 ' + tips[0];
-      cgTipEl.style.display = '';
-    } else {
-      cgTipEl.style.display = 'none';
-    }
-
-    captureGuideEl.style.display = 'block';
-  }
-
-  /* ── Share scene ───────────────────────────────────────── */
-  function shareScene(jobId, btn) {
-    const url = `${location.origin}/viewer/${jobId}`;
-    if (navigator.clipboard && navigator.clipboard.writeText) {
-      navigator.clipboard.writeText(url).then(() => {
-        btn.textContent = '✓ Copied';
-        btn.classList.add('copied');
-        setTimeout(() => {
-          btn.textContent = '↗ Share';
-          btn.classList.remove('copied');
-        }, 2000);
-      }).catch(() => fallbackCopy(url));
-    } else {
-      fallbackCopy(url);
-    }
-  }
-
-  function fallbackCopy(text) {
-    const ta = document.createElement('textarea');
-    ta.value = text;
-    ta.style.cssText = 'position:fixed;opacity:0';
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    document.body.removeChild(ta);
-    toast('Link copied', text);
   }
 
 
