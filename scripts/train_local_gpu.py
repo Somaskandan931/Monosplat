@@ -84,17 +84,17 @@ def _pick_profile(vram_gb: float) -> dict:
         )
     elif vram_gb >= 8:
         return dict(
-            iterations=15_000, max_gaussians=200_000, sh_degree=3,
-            width=800, height=450, batch_size=3_000,
+            iterations=15_000, max_gaussians=100_000, sh_degree=3,
+            width=960, height=540, batch_size=3_000,
             densify_from=500,  densify_until=12_000, densify_interval=100,
             grad_threshold=0.0002, label="Mid-range (8-20 GB)",
         )
     elif vram_gb >= 4:
         return dict(
-            iterations=7_000, max_gaussians=80_000, sh_degree=1,
-            width=640, height=360, batch_size=1_500,
-            densify_from=500,  densify_until=5_000, densify_interval=150,
-            grad_threshold=0.0003, label="Entry-level (4-8 GB)",
+            iterations=15_000, max_gaussians=100_000, sh_degree=3,
+            width=960, height=540, batch_size=1_500,
+            densify_from=500,  densify_until=12_000, densify_interval=100,
+            grad_threshold=0.0002, label="Entry-level (4-8 GB)",
         )
     else:
         return dict(

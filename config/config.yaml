@@ -22,7 +22,7 @@ training:
   checkpoint_dir: "models/checkpoints"
   # ── gsplat-compatible hyperparameters ──────────────────────────────────────
   # gsplat uses the same schedule as the original 3DGS paper with improvements.
-  iterations: 30000
+  iterations: 15000
   iterations_cpu: 1000      # hard cap when running without GPU
   save_every: 5000
   eval_every: 1000          # compute PSNR/SSIM on held-out cameras
