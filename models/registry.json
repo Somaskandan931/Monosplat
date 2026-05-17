@@ -21,28 +21,5 @@
     "cloud_urls": {},
     "ai_detections": 0,
     "ai_results": {}
-  },
-  "9dcc68fa926b": {
-    "job_id": "9dcc68fa926b",
-    "item_name": "vase_1",
-    "upload_dir": "uploads\\vase_1",
-    "work_dir": "work\\9dcc68fa926b",
-    "status": "failed",
-    "progress": 0,
-    "message": "Pipeline failed \u2014 see server logs",
-    "ply_path": null,
-    "splat_path": null,
-    "thumbnail": null,
-    "num_images": 124,
-    "num_gaussians": 0,
-    "error": "torch.Size([124750, 3])",
-    "created_at": "2026-05-17T17:35:26.506360",
-    "updated_at": "2026-05-17T17:57:00.181096",
-    "scene_notes": "",
-    "tags": [],
-    "warnings": [],
-    "cloud_urls": {},
-    "ai_detections": 0,
-    "ai_results": {}
   }
 }
