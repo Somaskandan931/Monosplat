@@ -273,7 +273,17 @@ class GaussianTrainer:
                 avg_loss     = running_loss / callback_every
                 running_loss = 0.0
                 try:
-                    on_iter_callback(it, avg_loss)
+                    # Pass extended stats: (iter, avg_loss, n_gaussians, nan_count)
+                    # Callers that only accept (iter, loss) still work via *args inspection.
+                    import inspect
+                    sig = inspect.signature(on_iter_callback)
+                    n_params = len(sig.parameters)
+                    if n_params >= 4:
+                        on_iter_callback(it, avg_loss, len(self.model), nan_count)
+                    elif n_params == 3:
+                        on_iter_callback(it, avg_loss, len(self.model))
+                    else:
+                        on_iter_callback(it, avg_loss)
                 except Exception:
                     pass
 
@@ -284,6 +294,7 @@ class GaussianTrainer:
         print(f"[Trainer] Training complete. Output: {self.output_dir}")
         if nan_count:
             print(f"[Trainer] Total NaN iterations skipped: {nan_count}")
+        self.nan_count = nan_count  # expose for metrics collection
 
         self.last_metrics = {
             "num_gaussians": len(self.model),

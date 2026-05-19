@@ -148,6 +148,10 @@ class GaussianModel(nn.Module):
         # 360GS initialises with log(mean_dist) directly.
         mean_dist  = _knn_mean_dist(pts, k=3)
         log_scales = torch.log(mean_dist).unsqueeze(1).expand(n, 3).clone()
+        # Clamp: prevents divergence when scene-scale mean_dist >> 1.0 (outdoor / large rooms)
+        # and prevents near-zero scales that produce invisible Gaussians (heavily cropped sparse clouds).
+        # Range [-4.0, 0.5] corresponds to scales in [~0.018, ~1.65] world units.
+        log_scales = log_scales.clamp(min=-4.0, max=0.5)
 
         opacities = inverse_sigmoid(torch.full((n, 1), 0.1))  # 360GS uses 0.1
         rotations = torch.zeros(n, 4)
@@ -312,7 +316,13 @@ class GaussianModel(nn.Module):
         self._opacities     = nn.Parameter(torch.cat([self._opacities.detach()[keep],     self._opacities.detach()[selected].repeat(N, 1)], dim=0))
         self._scales        = nn.Parameter(torch.cat([self._scales.detach()[keep],        new_log_scales], dim=0))
         self._rotations     = nn.Parameter(torch.cat([self._rotations.detach()[keep],     self._rotations.detach()[selected].repeat(N, 1)], dim=0))
-        print(f"[GaussianModel] Split {n_split:,} → {n_split*N:,} children.")
+        print(f"[GaussianModel] Split {n_split:,} 2192 {n_split*N:,} children.")
+        # Sanity: NaN/Inf after densification = bad init or grad explosion
+        if torch.isnan(self._positions).any() or torch.isinf(self._scales).any():
+            raise RuntimeError(
+                "[GaussianModel] NaN/Inf detected after densify_and_split. "
+                "Check scale clamp bounds and gradient accumulation."
+            )
 
     # ------------------------------------------------------------------
     # Serialisation (unchanged)

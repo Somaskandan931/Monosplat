@@ -1,0 +1,48 @@
+# requirements-lock.txt
+# ─────────────────────────────────────────────────────────────────────────────
+# EXACT pinned pip dependencies for MonoSplat.
+# Generated against: Python 3.10, CUDA 11.8, PyTorch 2.1.0
+#
+# Install with:
+#   pip install -r requirements-lock.txt
+#
+# For PyTorch (must match CUDA version), install FIRST before this file:
+#   pip install torch==2.1.0+cu118 torchvision==0.16.0+cu118 \
+#       --index-url https://download.pytorch.org/whl/cu118
+#
+# Do NOT `pip install -r requirements-lock.txt` without installing PyTorch first
+# — pip will pull a CPU-only torch from PyPI.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Core (install torch separately, see above) ───────────────────────────────
+numpy==1.24.4
+scipy==1.11.4
+
+# ── Image / Video ────────────────────────────────────────────────────────────
+Pillow==10.0.1
+imageio==2.31.6
+opencv-python==4.8.1.78
+
+# ── 3D Gaussian Splatting ─────────────────────────────────────────────────────
+gsplat==1.3.0
+plyfile==0.8.1
+
+# ── Training quality metrics ─────────────────────────────────────────────────
+pytorch-msssim==0.2.1
+lpips==0.1.4
+
+# ── Web server ───────────────────────────────────────────────────────────────
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+python-multipart==0.0.6
+aiofiles==23.2.1
+websockets==12.0
+starlette==0.27.0
+
+# ── Config / utilities ───────────────────────────────────────────────────────
+pyyaml==6.0.1
+tqdm==4.66.1
+
+# ── Task queue ───────────────────────────────────────────────────────────────
+rq==1.16.0
+redis==5.0.1

@@ -741,8 +741,18 @@ def extract_from_video(
     print(f"[extract] Quality score: {quality_score:.0f}")
 
     # ------------------ FINAL SAFETY ------------------
-    if kept < 20:
-        print("[extract] ⚠ Too few frames for COLMAP")
+    # Hard fail: COLMAP needs >= 40 frames for reliable reconstruction.
+    # A warning-only gate here means the pipeline silently produces a degenerate splat.
+    if kept < 40:
+        raise RuntimeError(
+            f"[extract] HARD FAILURE: Only {kept} frames extracted after filtering.\n"
+            "COLMAP requires >= 40 frames for reliable sparse reconstruction.\n"
+            "Fix:\n"
+            "  1. Use a longer video (>= 20 seconds of footage).\n"
+            "  2. Reduce blur filter threshold if too many frames are being rejected.\n"
+            "  3. Improve lighting to reduce motion blur.\n"
+            "  4. Shoot at a slower speed to avoid duplicate frame rejection."
+        )
 
     print(f"[extract] FINAL: {kept} frames kept")
     return kept

@@ -296,143 +296,143 @@ def run_colmap(
     ]
     _run_or_die(mapper_cmd, "Sparse Reconstruction (SfM)", on_progress)
 
-    # ---- 4. Convert binary → text ----------------------------------------
+    # ---- 4. Hard gate: model must exist ---------------------------------
     model_src = sparse_dir / "0"
     if not model_src.exists():
-        print(
-            "[COLMAP] ⚠  No model at sparse/0. "
-            "Tips: capture from more angles, ensure 60%+ image overlap, "
-            "good lighting and a textured object."
+        raise RuntimeError(
+            "[COLMAP] HARD FAILURE: No model produced at sparse/0.\n"
+            "COLMAP failed to register any images — reconstruction is impossible.\n"
+            "Fix:\n"
+            "  1. Capture a slow orbit video (>=30 s, one step/second around subject).\n"
+            "  2. Ensure 60-80% overlap between consecutive frames.\n"
+            "  3. Use diffuse lighting — eliminate specular/mirror-like surfaces.\n"
+            "  4. Place object on a textured surface (newspaper, textured mat).\n"
+            "  5. Avoid pure-black backgrounds and featureless walls."
         )
-        if on_progress:
-            on_progress("Sparse Reconstruction", "WARNING: No model produced at sparse/0")
-        return
 
     _run_or_die([
         colmap_binary, "model_converter",
         "--input_path",  str(model_src),
         "--output_path", str(text_dir),
         "--output_type", "TXT",
-    ], "Model Conversion (binary → text)", on_progress)
+    ], "Model Conversion (binary -> text)", on_progress)
 
-    # ---- 5. Registration quality report ----------------------------------
-    try:
-        images_txt = text_dir / "images.txt"
-        if images_txt.exists():
-            registered = 0
-            data_line_idx = 0
-            with open(images_txt) as f:
-                for line in f:
-                    line = line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    # images.txt alternates: image-header line, keypoints line.
-                    # Count only even-indexed data lines (the header lines).
-                    if data_line_idx % 2 == 0:
-                        registered += 1
-                    data_line_idx += 1
+    # ---- 5. Registration quality — HARD GATE at < 60% -------------------
+    def _count_registered(txt_dir):
+        imgs_txt = txt_dir / "images.txt"
+        if not imgs_txt.exists():
+            return 0
+        count = 0
+        idx = 0
+        with open(imgs_txt) as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if idx % 2 == 0:
+                    count += 1
+                idx += 1
+        return count
 
-            total = len(images)
-            ratio = registered / max(total, 1)
-            print(f"\n[COLMAP] Sparse Reconstruction: Registered {registered}/{total} images ({ratio*100:.0f}%)")
+    registered = _count_registered(text_dir)
+    total = len(images)
+    ratio = registered / max(total, 1)
+    print(f"\n[COLMAP] Registration: {registered}/{total} images ({ratio*100:.0f}%)")
 
-            if ratio < 0.5:
-                print(
-                    f"[COLMAP] ⚠  WARNING: only {registered}/{total} frames registered ({ratio*100:.0f}%). "
-                    "Attempting low-quality auto-retry…"
-                )
-                if on_progress:
-                    on_progress(
-                        "Sparse Reconstruction",
-                        f"WARNING: only {registered}/{total} frames registered ({ratio*100:.0f}%). Retrying with relaxed thresholds…"
-                    )
+    if ratio < 0.60:
+        print(f"[COLMAP] Registration {ratio*100:.0f}% < 60% threshold — attempting low-quality retry...")
+        if on_progress:
+            on_progress("Sparse Reconstruction",
+                        f"Registration {ratio*100:.0f}% — retrying with relaxed thresholds...")
 
-                # Auto-retry with the most permissive mapper settings.
-                # Clear the previous (incomplete) sparse model first.
-                import shutil as _shutil
-                for _d in sparse_dir.iterdir():
-                    if _d.is_dir():
-                        _shutil.rmtree(_d)
-                    else:
-                        _d.unlink()
-
-                mq_low = _mapper_quality["low"]
-                retry_mapper_cmd = [
-                    colmap_binary, "mapper",
-                    "--database_path",                       db_path,
-                    "--image_path",                          str(image_dir),
-                    "--output_path",                         str(sparse_dir),
-                    "--Mapper.min_num_matches",              str(mq_low["min_num_matches"]),
-                    "--Mapper.init_min_num_inliers",         str(mq_low["init_min_num_inliers"]),
-                    "--Mapper.abs_pose_min_num_inliers",     str(mq_low["abs_pose_min_num_inliers"]),
-                    "--Mapper.ba_global_function_tolerance", "0.000001",
-                    "--Mapper.ba_local_max_num_iterations",  "15",
-                    "--Mapper.ba_global_max_num_iterations", "30",
-                    # Extra leniency for short / fast-motion videos
-                    "--Mapper.min_focal_length_ratio",       "0.1",
-                    "--Mapper.max_focal_length_ratio",       "10",
-                    "--Mapper.max_extra_param",              "1",
-                ]
-                rc_retry = run_cmd(retry_mapper_cmd, "Sparse Reconstruction (low-quality retry)", on_progress)
-                if rc_retry == 0:
-                    # Re-run model conversion on the new output
-                    model_src_retry = sparse_dir / "0"
-                    if model_src_retry.exists():
-                        import shutil as _sh2
-                        if text_dir.exists():
-                            _sh2.rmtree(text_dir)
-                        text_dir.mkdir(parents=True, exist_ok=True)
-                        run_cmd([
-                            colmap_binary, "model_converter",
-                            "--input_path",  str(model_src_retry),
-                            "--output_path", str(text_dir),
-                            "--output_type", "TXT",
-                        ], "Model Conversion (retry)", on_progress)
-                        print("[COLMAP] ✓  Low-quality retry succeeded — check registration stats below.")
-                    else:
-                        print("[COLMAP] ⚠  Low-quality retry produced no model at sparse/0.")
-                else:
-                    print(
-                        "[COLMAP] ⚠  Low-quality retry also failed. "
-                        "Record a slower video (≥30 s, one step/second around the subject)."
-                    )
-    except Exception as e:
-        print(f"[COLMAP] Could not parse registration stats: {e}")
-
-    # ---- 6. 3D point count diagnostic ------------------------------------
-    # This is the most direct indicator of whether training will produce a
-    # usable Gaussian splat. < 500 points = almost certainly empty render.
-    try:
-        points3d_txt = text_dir / "points3D.txt"
-        if points3d_txt.exists():
-            n_points = sum(
-                1 for line in open(points3d_txt)
-                if line.strip() and not line.startswith("#")
-            )
-            print(f"[COLMAP] 3D points in sparse model: {n_points:,}")
-
-            if n_points < 500:
-                msg = (
-                    f"[COLMAP] ⚠  CRITICAL: Only {n_points} 3D points found.\n"
-                    "  This will produce an almost-empty Gaussian splat (like the 46-splat case).\n"
-                    "  Fix:\n"
-                    "    1. Reshoot with 40-80 images or a slow-orbit video.\n"
-                    "    2. Use diffuse lighting — eliminate specular highlights.\n"
-                    "    3. Place object on a textured surface (newspaper, graph paper).\n"
-                    "    4. Ensure 60-80% overlap between consecutive frames.\n"
-                    "    5. Avoid pure-black backgrounds."
-                )
-                print(msg)
-                if on_progress:
-                    on_progress(
-                        "Sparse Reconstruction",
-                        f"CRITICAL: Only {n_points} 3D points — splat will be nearly empty. Reshoot with better lighting and 60%+ overlap."
-                    )
-            elif n_points < 5000:
-                print(f"[COLMAP] ⚠  MARGINAL: {n_points} points — splat quality may be low.")
+        import shutil as _shutil
+        for _d in sparse_dir.iterdir():
+            if _d.is_dir():
+                _shutil.rmtree(_d)
             else:
-                print(f"[COLMAP] ✓  Good sparse cloud: {n_points:,} points.")
-    except Exception as e:
-        print(f"[COLMAP] Could not count 3D points: {e}")
+                _d.unlink()
 
-    print(f"[COLMAP] COLMAP Complete ✓")
+        mq_low = _mapper_quality["low"]
+        retry_cmd = [
+            colmap_binary, "mapper",
+            "--database_path",                       db_path,
+            "--image_path",                          str(image_dir),
+            "--output_path",                         str(sparse_dir),
+            "--Mapper.min_num_matches",              str(mq_low["min_num_matches"]),
+            "--Mapper.init_min_num_inliers",         str(mq_low["init_min_num_inliers"]),
+            "--Mapper.abs_pose_min_num_inliers",     str(mq_low["abs_pose_min_num_inliers"]),
+            "--Mapper.ba_global_function_tolerance", "0.000001",
+            "--Mapper.ba_local_max_num_iterations",  "15",
+            "--Mapper.ba_global_max_num_iterations", "30",
+            "--Mapper.min_focal_length_ratio",       "0.1",
+            "--Mapper.max_focal_length_ratio",       "10",
+            "--Mapper.max_extra_param",              "1",
+        ]
+        rc_retry = run_cmd(retry_cmd, "Sparse Reconstruction (low-quality retry)", on_progress)
+
+        if rc_retry != 0 or not (sparse_dir / "0").exists():
+            raise RuntimeError(
+                f"[COLMAP] HARD FAILURE: Low-quality retry also failed.\n"
+                f"Registered only {registered}/{total} ({ratio*100:.0f}%) images even with relaxed thresholds.\n"
+                "Record a slower video with 60-80% frame overlap."
+            )
+
+        import shutil as _sh2
+        if text_dir.exists():
+            _sh2.rmtree(text_dir)
+        text_dir.mkdir(parents=True, exist_ok=True)
+        run_cmd([
+            colmap_binary, "model_converter",
+            "--input_path",  str(sparse_dir / "0"),
+            "--output_path", str(text_dir),
+            "--output_type", "TXT",
+        ], "Model Conversion (retry)", on_progress)
+
+        # Re-validate after retry — HARD GATE applied again
+        registered = _count_registered(text_dir)
+        ratio = registered / max(total, 1)
+        print(f"[COLMAP] Post-retry registration: {registered}/{total} ({ratio*100:.0f}%)")
+        if ratio < 0.60:
+            raise RuntimeError(
+                f"[COLMAP] HARD FAILURE: Post-retry registration still only {ratio*100:.0f}%.\n"
+                f"Registered {registered}/{total} images — below the 60% minimum for a usable splat.\n"
+                "Reshoot with diffuse lighting, textured background, and slow orbit capture."
+            )
+        print("[COLMAP] Low-quality retry succeeded.")
+
+    # ---- 6. 3D point count — HARD GATE at < 500 -------------------------
+    # < 500 points produces an almost-empty Gaussian splat (the 46-Gaussian failure mode).
+    # HARD STOP — training cannot recover from a degenerate sparse cloud.
+    points3d_txt = text_dir / "points3D.txt"
+    if not points3d_txt.exists():
+        raise RuntimeError(
+            "[COLMAP] HARD FAILURE: points3D.txt not found after model conversion.\n"
+            "The sparse reconstruction produced no 3D structure. Check COLMAP logs above."
+        )
+
+    n_points = sum(
+        1 for line in open(points3d_txt)
+        if line.strip() and not line.startswith("#")
+    )
+    print(f"[COLMAP] 3D points in sparse model: {n_points:,}")
+
+    if n_points < 500:
+        raise RuntimeError(
+            f"[COLMAP] HARD FAILURE: Only {n_points} 3D points reconstructed.\n"
+            "Training cannot produce a usable Gaussian splat from this reconstruction.\n"
+            "Root cause: insufficient feature matches between views.\n"
+            "Fix:\n"
+            "  1. Shoot 60-80% overlap (slow orbit, one step/second).\n"
+            "  2. Use diffuse lighting — eliminate specular highlights.\n"
+            "  3. Place object on a textured surface (newspaper, graph paper).\n"
+            "  4. Avoid pure-black/white backgrounds.\n"
+            "  5. Target >= 5,000 points for reliable training."
+        )
+    elif n_points < 5000:
+        print(f"[COLMAP] WARNING: {n_points} points — quality may be low. Target >= 5,000.")
+        if on_progress:
+            on_progress("Sparse Reconstruction", f"MARGINAL: {n_points} 3D points — quality may be low.")
+    else:
+        print(f"[COLMAP] Good sparse cloud: {n_points:,} points.")
+
+    print(f"[COLMAP] COLMAP pipeline complete: {registered}/{total} images, {n_points:,} points.")
