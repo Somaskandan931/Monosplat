@@ -310,10 +310,10 @@ def load_data(colmap_dir: str, frames_dir: str, cfg, W: int, H: int):
             missing.append(img_data.name)
             continue
 
-        img_np = np.array(
-            Image.open(img_path).convert("RGB").resize((W, H), Image.LANCZOS),
-            dtype=np.float32,
-        ) / 255.0
+        img = Image.open(img_path).convert("RGB")
+        if W and H:
+            img = img.resize((W, H), Image.LANCZOS)
+        img_np = np.array(img, dtype=np.float32) / 255.0
         train_cameras.append(cam)
         train_images.append(torch.from_numpy(img_np).permute(2, 0, 1).cpu())
 
@@ -381,6 +381,9 @@ def train(args, cfg, profile: dict, device: str) -> tuple:
         cfg.viewer = type("Config", (), {})()
     cfg.viewer.window_width  = W
     cfg.viewer.window_height = H
+    # Write training resolution separately — viewer dims must not drive data loading
+    if not hasattr(cfg, "training"):
+        cfg.training = type("Config", (), {})()
 
     save_every    = getattr(cfg.training, "save_every", 1000)
     lambda_dssim  = getattr(cfg.training, "lambda_dssim", 0.2)
@@ -391,11 +394,15 @@ def train(args, cfg, profile: dict, device: str) -> tuple:
         args.colmap_dir, args.frames_dir, cfg, W, H
     )
 
-    # Subsample if initial cloud exceeds MAX_GAUSS
-    if len(xyzs) > MAX_GAUSS:
-        idx  = np.random.choice(len(xyzs), MAX_GAUSS, replace=False)
+    # Cap initial cloud at 125,000 points — preserves geometry vs the old 50k cap.
+    # The raw COLMAP cloud may have 125k+ points; discarding them starves the
+    # Gaussian model of geometry and limits densification headroom.
+    MAX_INIT_POINTS = 125000
+    if len(xyzs) > MAX_INIT_POINTS:
+        idx  = np.random.choice(len(xyzs), MAX_INIT_POINTS, replace=False)
         xyzs = xyzs[idx];  rgbs = rgbs[idx]
-        print(f"  Point cloud subsampled -> {MAX_GAUSS:,} points")
+        print(f"  Raw cloud: {len(xyzs) + (len(xyzs) - MAX_INIT_POINTS):,} points")
+        print(f"  ⚠️  Downsampled to {MAX_INIT_POINTS:,} points")
 
     # Init model
     model = GaussianModel(sh_degree=SH)

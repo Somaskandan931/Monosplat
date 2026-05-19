@@ -56,8 +56,11 @@ def load_training_data(colmap_dir: str, image_dir: str, cfg, eval_split: bool = 
     """
     cameras_colmap, images_colmap, points3d = load_colmap_model(colmap_dir)
 
-    W = cfg.viewer.window_width
-    H = cfg.viewer.window_height
+    # Use training resolution — viewer settings must NEVER drive training data.
+    # Viewer width/height controls the display window only.
+    W = getattr(cfg.training, "image_width",  960)
+    H = getattr(cfg.training, "image_height", 540)
+    enable_resize = getattr(cfg.training, "enable_resize", True)
 
     all_cameras, all_images = [], []
     image_dir = Path(image_dir)
@@ -77,10 +80,10 @@ def load_training_data(colmap_dir: str, image_dir: str, cfg, eval_split: bool = 
             skipped += 1
             continue
 
-        img = np.array(
-            Image.open(img_path).convert("RGB").resize((W, H), Image.LANCZOS),
-            dtype=np.float32,
-        ) / 255.0
+        img = Image.open(img_path).convert("RGB")
+        if enable_resize:
+            img = img.resize((W, H), Image.LANCZOS)
+        img = np.array(img, dtype=np.float32) / 255.0
         all_cameras.append(cam)
         all_images.append(torch.from_numpy(img).permute(2, 0, 1).cpu())
 
