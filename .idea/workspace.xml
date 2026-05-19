@@ -5,13 +5,7 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="89cd2aa2-4dca-4407-ae3e-666e58d4b988" name="Changes" comment="">
-      <change beforePath="$PROJECT_DIR$/models/registry.json" beforeDir="false" afterPath="$PROJECT_DIR$/models/registry.json" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/notebooks/monosplat_colab_gpu.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/notebooks/monosplat_colab_gpu.ipynb" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/requirements-lock.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements-lock.txt" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/__init__.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/reconstruction/trainer.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/reconstruction/trainer.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils/io_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/io_utils.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/src/utils/metrics.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/metrics.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />

@@ -1,31 +1,37 @@
 project:
   name: "MonoSplat — Video to 3D Gaussian Splat"
-  version: "3.0.0"
+  version: "2.0.0"
   mode: "object"   # object | scene | panoramic
 
 data:
-  raw_dir: "data/raw"
-  processed_dir: "data/processed"
-  colmap_output_dir: "data/colmap_output"
-  image_extensions: [".jpg", ".jpeg", ".png"]
-  video_fps: null      # null = adaptive (duration-based); override with a number
-  max_frames: 600      # caps memory during frame extraction
+  raw_dir:            "data/raw"
+  processed_dir:      "data/processed"
+  colmap_output_dir:  "data/colmap_output"
+  image_extensions:   [".jpg", ".jpeg", ".png"]
+  video_fps:          null        # null = adaptive (duration-based)
+  max_frames:         600
 
 colmap:
-  binary_path: "colmap"
-  quality: "medium"        # low / medium / high
-  camera_model: "OPENCV"   # OPENCV handles radial distortion well for phone video
-  single_camera: true      # phone video: one camera, one lens model
+  binary_path:    "colmap"
+  quality:        "medium"        # low / medium / high
+  camera_model:   "OPENCV"        # handles radial distortion well for phone video
+  single_camera:  true
 
+# ── Training ────────────────────────────────────────────────────────────────
 training:
-  output_dir: "models/gaussian"
-  checkpoint_dir: "models/checkpoints"
-  # ── gsplat-compatible hyperparameters ──────────────────────────────────────
-  # gsplat uses the same schedule as the original 3DGS paper with improvements.
-  iterations: 15000
-  iterations_cpu: 1000      # hard cap when running without GPU
-  save_every: 5000
-  eval_every: 1000          # compute PSNR/SSIM on held-out cameras
+  output_dir:       "models/gaussian"
+  checkpoint_dir:   "models/checkpoints"
+
+  iterations:       15000
+  iterations_cpu:   1000
+
+  save_every:       5000
+  eval_every:       1000
+
+  # Cosine LR + warmup (v2 improvement over raw exp decay)
+  # Position LR decays from 1.6e-4 → ~1.6e-6 over training.
+  # Warmup ramps up from 0 over the first 300 iters — prevents early divergence.
+  lr_warmup_iters: 300
 
   learning_rate:
     position:       0.00016
@@ -33,81 +39,63 @@ training:
     opacity:        0.05
     scaling:        0.005
     rotation:       0.001
-    position_final: 0.0000016   # exponential decay target (100× reduction)
 
-  # ── Densification schedule ─────────────────────────────────────────────────
+  # ── Densification schedule ────────────────────────────────────────────────
   densify_from_iter:        500
   densify_until_iter:       15000
   densification_interval:   100
   opacity_reset_interval:   3000
 
-  # ── Gaussian control ───────────────────────────────────────────────────────
-  percent_dense:            0.01      # Gaussians > 1% of scene extent are split
-  densify_grad_threshold:   0.0002    # 3DGS / gsplat default
-  lambda_dssim:             0.2       # weight of SSIM in combined loss
+  # Adaptive densification: grad_threshold is auto-scaled by scene density.
+  # Sparse cloud (<1k Gaussians) → threshold * 0.5 (more aggressive).
+  # Dense cloud (>100k)         → threshold * 2.0 (conservative).
+  percent_dense:              0.01
+  densify_grad_threshold:     0.0002
+
+  lambda_dssim:               0.2
+
+  # ── Convergence monitoring (v2) ────────────────────────────────────────────
+  # Detects plateau, instability, and over-pruning.
+  convergence:
+    window:         200     # rolling loss window
+    patience:       5       # windows with < tol improvement → plateau
+    tol:            0.0005  # minimum loss improvement to not count as plateau
+    spike_tol:      0.15    # loss jump > 15% triggers instability warning
+    safety_floor:   500     # Gaussian count below this → over-pruning warning
 
 renderer:
-  # gsplat rasterizer settings
-  background_color: [1.0, 1.0, 1.0]  # white bg — better for object evaluation
-  sh_degree: 3                         # full SH for best view-dependent appearance
-  max_gaussians: 1000000               # 1M cap — browser-safe for gsplat .splat files
-
-  # Software fallback (used when gsplat CUDA is unavailable)
-  batch_size: 5000
+  background_color: [1.0, 1.0, 1.0]   # white background
+  sh_degree:        3
+  max_gaussians:    1000000
+  batch_size:       5000               # software fallback chunk size
 
 viewer:
-  # Resolution used for training renders — square avoids portrait/landscape crop
-  window_width: 800
-  window_height: 800
-  target_fps: 60
-  fov_degrees: 60.0
-  near_plane: 0.01
-  far_plane: 100.0
+  window_width:   800
+  window_height:  800
+  target_fps:     60
+  fov_degrees:    60.0
+  near_plane:     0.01
+  far_plane:      100.0
 
 output:
-  renders_dir: "outputs/renders"
-  logs_dir: "outputs/logs"
-  videos_dir: "outputs/videos"
+  renders_dir:    "outputs/renders"
+  logs_dir:       "outputs/logs"
+  videos_dir:     "outputs/videos"
 
-# ── Cloud Storage (Stage 5) ─────────────────────────────────────────────────────
-# Enable true cloud deployment with S3/GCS integration
 cloud_storage:
-  enabled: false  # Set to true to enable cloud storage uploads
-  
-  # Storage backend: "s3" | "gcs" | "local"
+  enabled: false
   type: "local"
-  
-  # S3 configuration (for type: "s3")
   s3:
-    bucket: "monosplat-jobs"
-    region: "us-east-1"
-    # Optional: provide credentials directly (not recommended for production)
-    # aws_access_key_id: ""
-    # aws_secret_access_key: ""
-  
-  # GCS configuration (for type: "gcs")
+    bucket:  "monosplat-jobs"
+    region:  "us-east-1"
   gcs:
-    bucket: "monosplat-jobs"
-    # Optional: path to service account JSON
-    # credentials_path: "/path/to/credentials.json"
-  
-  # Local fallback configuration (for type: "local")
+    bucket:  "monosplat-jobs"
   local:
     path: "cloud_storage"
 
-# ── AI Layer (Stage 7) ───────────────────────────────────────────────────────────
-# Enable intelligent scene understanding
 ai_layer:
-  enabled: false  # Set to true to enable AI features
-  
-  # Object detection model
-  detection_model: "yolov8n.pt"  # yolov8n.pt, yolov8s.pt, yolov8m.pt, yolov8l.pt
-  
-  # Semantic segmentation model
-  segmentation_model: "facebook/sam-vit-base"
-  
-  # Scene QA model
-  qa_model: "gpt2"  # gpt2, gpt2-medium, gpt2-large
-  
-  # Confidence threshold for object detection
+  enabled: false
+  detection_model:     "yolov8n.pt"
+  segmentation_model:  "facebook/sam-vit-base"
+  qa_model:            "gpt2"
   detection_confidence: 0.5

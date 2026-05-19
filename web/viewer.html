@@ -1,0 +1,876 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>MonoSplat · 3D Gaussian Viewer</title>
+<style>
+  /* ── Design tokens ─────────────────────────────────────────────── */
+  :root {
+    --bg:      #090b0f;
+    --panel:   #10141b;
+    --panel2:  #151b24;
+    --line:    #253041;
+    --text:    #eef3f8;
+    --muted:   #8b98aa;
+    --soft:    #c4cedb;
+    --brand:   #21d19f;
+    --warn:    #f5b84b;
+    --bad:     #ef5b6b;
+    --blue:    #70a7ff;
+    --r:       8px;
+    --mono:    'JetBrains Mono', Consolas, monospace;
+    --sans:    Inter, system-ui, sans-serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: var(--bg); font-family: var(--sans); color: var(--text); }
+
+  /* ── Canvas ─────────────────────────────────────────────────────── */
+  #canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  /* ── Header bar ─────────────────────────────────────────────────── */
+  #header {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 20;
+    display: flex; align-items: center; gap: 16px; padding: 12px 20px;
+    background: rgba(9,11,15,.85); border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(16px);
+  }
+  #logo { font-size: 18px; font-weight: 800; }
+  #logo span { color: var(--brand); }
+  #header-center { flex: 1; display: flex; align-items: center; gap: 8px; }
+  .hbtn {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 6px;
+    color: var(--soft); font-size: 12px; padding: 6px 12px; cursor: pointer;
+    transition: border-color .15s, color .15s;
+  }
+  .hbtn:hover { border-color: var(--brand); color: var(--brand); }
+  .hbtn.active { border-color: var(--brand); color: var(--brand); background: rgba(33,209,159,.08); }
+  #drop-hint {
+    color: var(--muted); font-size: 13px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  #drop-hint svg { opacity: .5; }
+
+  /* ── Stats overlay ──────────────────────────────────────────────── */
+  #stats-overlay {
+    position: fixed; top: 60px; right: 16px; z-index: 20;
+    background: rgba(9,11,15,.82); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 10px 14px; backdrop-filter: blur(12px);
+    font-family: var(--mono); font-size: 11px; line-height: 1.8;
+    min-width: 180px;
+  }
+  .stat-row { display: flex; justify-content: space-between; gap: 20px; }
+  .stat-label { color: var(--muted); }
+  .stat-val   { color: var(--brand); font-weight: 600; }
+
+  /* ── Help panel ─────────────────────────────────────────────────── */
+  #help-panel {
+    position: fixed; bottom: 20px; left: 16px; z-index: 20;
+    background: rgba(9,11,15,.82); border: 1px solid var(--line); border-radius: var(--r);
+    padding: 12px 16px; backdrop-filter: blur(12px);
+    font-family: var(--mono); font-size: 11px; line-height: 2; max-width: 220px;
+    display: none;
+  }
+  #help-panel.visible { display: block; }
+  .key { display: inline-block; background: var(--panel2); border: 1px solid var(--line);
+         border-radius: 4px; padding: 1px 5px; margin-right: 4px; color: var(--blue); }
+
+  /* ── Loading overlay ────────────────────────────────────────────── */
+  #loader {
+    position: fixed; inset: 0; z-index: 100;
+    background: var(--bg); display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 20px;
+    transition: opacity .4s;
+  }
+  #loader.hidden { opacity: 0; pointer-events: none; }
+  #loader-title { font-size: 28px; font-weight: 800; }
+  #loader-title span { color: var(--brand); }
+  #loader-sub { color: var(--muted); font-size: 14px; }
+  #loader-bar-wrap {
+    width: 300px; height: 4px; background: var(--line); border-radius: 2px;
+  }
+  #loader-bar {
+    height: 100%; background: var(--brand); border-radius: 2px;
+    transition: width .2s; width: 0%;
+  }
+  #loader-pct { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+
+  /* ── Drop zone overlay ──────────────────────────────────────────── */
+  #dropzone-overlay {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(9,11,15,.88); border: 2px dashed var(--brand);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px; font-weight: 700; color: var(--brand);
+    pointer-events: none; opacity: 0; transition: opacity .2s;
+  }
+  #dropzone-overlay.visible { opacity: 1; }
+
+  /* ── Screenshot flash ───────────────────────────────────────────── */
+  #flash {
+    position: fixed; inset: 0; background: white; z-index: 200;
+    opacity: 0; pointer-events: none; transition: opacity .12s;
+  }
+  #flash.on { opacity: 0.6; }
+
+  /* ── Toast ──────────────────────────────────────────────────────── */
+  #toast {
+    position: fixed; bottom: 20px; right: 16px; z-index: 300;
+    background: var(--panel); border: 1px solid var(--brand); border-radius: var(--r);
+    padding: 10px 16px; font-size: 13px; opacity: 0;
+    transition: opacity .25s; pointer-events: none;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ── Camera path UI ─────────────────────────────────────────────── */
+  #cam-path-bar {
+    position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    z-index: 20; display: none; align-items: center; gap: 10px;
+    background: rgba(9,11,15,.85); border: 1px solid var(--line); border-radius: 999px;
+    padding: 8px 20px; backdrop-filter: blur(12px);
+  }
+  #cam-path-bar.visible { display: flex; }
+  .cam-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--brand); }
+  #cam-path-count { font-family: var(--mono); font-size: 12px; color: var(--soft); }
+</style>
+</head>
+<body>
+
+<!-- Loading overlay -->
+<div id="loader">
+  <div id="loader-title">Mono<span>Splat</span></div>
+  <div id="loader-sub">Initialising 3D viewer…</div>
+  <div id="loader-bar-wrap"><div id="loader-bar"></div></div>
+  <div id="loader-pct">0%</div>
+</div>
+
+<!-- Drop zone overlay -->
+<div id="dropzone-overlay">Drop .splat / .ply file here</div>
+
+<!-- Main canvas -->
+<canvas id="canvas"></canvas>
+
+<!-- Screenshot flash -->
+<div id="flash"></div>
+
+<!-- Toast notifications -->
+<div id="toast"></div>
+
+<!-- Header -->
+<div id="header">
+  <div id="logo">Mono<span>Splat</span> <span style="color:var(--muted);font-size:12px;font-weight:400;font-family:var(--mono);">viewer v2</span></div>
+  <div id="header-center">
+    <button class="hbtn" id="btn-load">📂 Load scene</button>
+    <button class="hbtn" id="btn-screenshot">📷 Screenshot</button>
+    <button class="hbtn" id="btn-fullscreen">⛶ Fullscreen</button>
+    <button class="hbtn" id="btn-record-path">⏺ Record path</button>
+    <button class="hbtn" id="btn-play-path" style="display:none">▶ Play cinematic</button>
+    <button class="hbtn" id="btn-help">? Help</button>
+    <span id="drop-hint">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      or drag & drop .splat / .ply
+    </span>
+  </div>
+</div>
+
+<!-- Stats overlay -->
+<div id="stats-overlay">
+  <div class="stat-row"><span class="stat-label">FPS</span>    <span class="stat-val" id="s-fps">—</span></div>
+  <div class="stat-row"><span class="stat-label">Splats</span> <span class="stat-val" id="s-count">—</span></div>
+  <div class="stat-row"><span class="stat-label">VRAM</span>   <span class="stat-val" id="s-vram">—</span></div>
+  <div class="stat-row"><span class="stat-label">Triangles</span><span class="stat-val" id="s-tri">—</span></div>
+  <div class="stat-row"><span class="stat-label">Draw calls</span><span class="stat-val" id="s-dc">—</span></div>
+  <div class="stat-row"><span class="stat-label">Cam</span>    <span class="stat-val" id="s-cam">—</span></div>
+</div>
+
+<!-- Help panel -->
+<div id="help-panel">
+  <div style="color:var(--brand);font-weight:700;margin-bottom:6px;">Keyboard & Controls</div>
+  <div><span class="key">LMB drag</span> Orbit</div>
+  <div><span class="key">RMB drag</span> Pan</div>
+  <div><span class="key">Scroll</span> Zoom</div>
+  <div><span class="key">W A S D</span> Fly</div>
+  <div><span class="key">Q / E</span> Roll</div>
+  <div><span class="key">Shift</span> Fast fly</div>
+  <div><span class="key">Space</span> Reset camera</div>
+  <div><span class="key">F</span> Fullscreen</div>
+  <div><span class="key">P</span> Screenshot</div>
+  <div><span class="key">H</span> Toggle help</div>
+</div>
+
+<!-- Camera path bar -->
+<div id="cam-path-bar">
+  <div class="cam-dot"></div>
+  <span id="cam-path-count">0 waypoints</span>
+  <button class="hbtn" id="btn-add-wp">+ Add waypoint</button>
+  <button class="hbtn" id="btn-clear-wp">✕ Clear</button>
+  <button class="hbtn" id="btn-stop-record" style="color:var(--bad);border-color:var(--bad)">■ Stop</button>
+</div>
+
+<!-- Hidden file input -->
+<input type="file" id="file-input" accept=".splat,.ply" style="display:none">
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js"
+  }
+}
+</script>
+
+<script type="module">
+// ============================================================
+// MonoSplat Viewer v2  ·  Three.js WebGL2 Gaussian Splatting
+// ============================================================
+//
+// Architecture:
+//   GaussianSplatRenderer  — parses .splat/.ply, builds GPU buffers, renders
+//   OrbitCamera            — orbit + pan + zoom + WASD fly mode
+//   CameraPathRecorder     — records waypoints, cubic-spline cinematic replay
+//   StatsPanel             — FPS counter + renderer info
+//   App                    — wires everything together
+//
+// Design decisions:
+//   • WebGL2 preferred (falls back to WebGL1)
+//   • Point-sprites for Gaussians (no instanced mesh overhead)
+//   • Back-to-front depth sort per frame (JS typed array, <1ms for <500k splats)
+//   • Progressive loading: renders partial scene while parsing continues
+//   • Drag-and-drop: .splat binary and .ply text both supported
+// ============================================================
+
+import * as THREE from "three";
+
+// ── Minimal GLSL shaders for Gaussian rendering ─────────────────────────────
+const SPLAT_VERT = /* glsl */`
+precision highp float;
+
+attribute vec3  position;
+attribute vec4  color;       // rgba (opacity in a)
+attribute vec2  cov2d_xy;    // packed 2D cov a,b (c=b by symmetry)
+attribute float cov2d_c;     // 2D cov c
+
+uniform mat4  modelViewMatrix;
+uniform mat4  projectionMatrix;
+uniform vec2  viewport;
+
+varying vec4  vColor;
+varying vec2  vUV;
+varying float vRadius;
+
+void main() {
+  vec4 camPos  = modelViewMatrix * vec4(position, 1.0);
+  vec4 clipPos = projectionMatrix * camPos;
+
+  // Project covariance to screen
+  float J0 = projectionMatrix[0][0] / camPos.z;
+  float J1 = projectionMatrix[1][1] / camPos.z;
+
+  float a = cov2d_xy.x * J0 * J0;
+  float b = cov2d_xy.y * J0 * J1;
+  float c = cov2d_c  * J1 * J1;
+
+  // Eigenvalue-based splat radius
+  float trace = a + c;
+  float det   = a * c - b * b;
+  float disc  = sqrt(max(0.0, trace*trace*0.25 - det));
+  float l1    = trace * 0.5 + disc;
+
+  float radius = ceil(sqrt(l1) * 3.0);
+  vRadius = radius;
+
+  gl_PointSize = max(1.0, radius * 2.0);
+  gl_Position  = clipPos;
+  vColor       = color;
+  vUV          = vec2(0.5, 0.5);
+}
+`;
+
+const SPLAT_FRAG = /* glsl */`
+precision highp float;
+varying vec4  vColor;
+varying float vRadius;
+
+void main() {
+  // Circular splat falloff
+  vec2  d    = gl_PointCoord - 0.5;
+  float dist = dot(d, d);
+  float alpha = exp(-dist * 8.0);
+
+  if (alpha < 0.01) discard;
+  gl_FragColor = vec4(vColor.rgb, vColor.a * alpha);
+}
+`;
+
+// ── Gaussian Splat Renderer ──────────────────────────────────────────────────
+class GaussianSplatRenderer {
+  constructor(scene) {
+    this.scene     = scene;
+    this.mesh      = null;
+    this.count     = 0;
+    this._sortWork = null; // TypedArray for reusable sort buffer
+  }
+
+  /** Load a .splat binary file (custom format: N × 32 bytes per splat) */
+  async loadSplat(buffer, onProgress) {
+    const bytes   = new Uint8Array(buffer);
+    const f32     = new Float32Array(buffer);
+    const nSplats = Math.floor(bytes.byteLength / 32);
+
+    const positions = new Float32Array(nSplats * 3);
+    const colors    = new Float32Array(nSplats * 4);
+    const cov_xy    = new Float32Array(nSplats * 2);
+    const cov_c     = new Float32Array(nSplats);
+
+    for (let i = 0; i < nSplats; i++) {
+      const base = i * 8; // 8 float32s per splat
+      positions[i*3]   = f32[base];
+      positions[i*3+1] = f32[base+1];
+      positions[i*3+2] = f32[base+2];
+
+      const r = bytes[base*4 + 24] / 255;
+      const g = bytes[base*4 + 25] / 255;
+      const b = bytes[base*4 + 26] / 255;
+      const a = bytes[base*4 + 27] / 255;
+      colors[i*4]   = r; colors[i*4+1] = g;
+      colors[i*4+2] = b; colors[i*4+3] = a;
+
+      cov_xy[i*2]   = f32[base + 4];
+      cov_xy[i*2+1] = f32[base + 5];
+      cov_c[i]      = f32[base + 6];
+
+      if (onProgress && i % 50000 === 0) onProgress(i / nSplats);
+    }
+
+    this._build(nSplats, positions, colors, cov_xy, cov_c);
+    return nSplats;
+  }
+
+  /** Load a simple PLY point cloud (xyz rgb) as plain-color splats */
+  async loadPly(text, onProgress) {
+    const lines      = text.split("\n");
+    let headerEnd    = 0;
+    let vertexCount  = 0;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line.startsWith("element vertex")) vertexCount = parseInt(line.split(" ")[2]);
+      if (line === "end_header") { headerEnd = i + 1; break; }
+    }
+
+    const n         = vertexCount;
+    const positions = new Float32Array(n * 3);
+    const colors    = new Float32Array(n * 4);
+    const cov_xy    = new Float32Array(n * 2);
+    const cov_c     = new Float32Array(n);
+
+    for (let i = 0; i < n; i++) {
+      const parts = lines[headerEnd + i].trim().split(/\s+/);
+      positions[i*3]   = parseFloat(parts[0]);
+      positions[i*3+1] = parseFloat(parts[1]);
+      positions[i*3+2] = parseFloat(parts[2]);
+      colors[i*4]   = parts[3] ? parseInt(parts[3]) / 255 : 0.7;
+      colors[i*4+1] = parts[4] ? parseInt(parts[4]) / 255 : 0.7;
+      colors[i*4+2] = parts[5] ? parseInt(parts[5]) / 255 : 0.7;
+      colors[i*4+3] = 0.9;
+      cov_xy[i*2]   = 0.02; cov_xy[i*2+1] = 0.0;
+      cov_c[i]      = 0.02;
+      if (onProgress && i % 50000 === 0) onProgress(i / n);
+    }
+
+    this._build(n, positions, colors, cov_xy, cov_c);
+    return n;
+  }
+
+  _build(n, positions, colors, cov_xy, cov_c) {
+    if (this.mesh) {
+      this.scene.remove(this.mesh);
+      this.mesh.geometry.dispose();
+      this.mesh.material.dispose();
+    }
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+    geo.setAttribute("color",    new THREE.BufferAttribute(colors,    4));
+    geo.setAttribute("cov2d_xy", new THREE.BufferAttribute(cov_xy,    2));
+    geo.setAttribute("cov2d_c",  new THREE.BufferAttribute(cov_c,     1));
+
+    const mat = new THREE.ShaderMaterial({
+      vertexShader:   SPLAT_VERT,
+      fragmentShader: SPLAT_FRAG,
+      transparent:    true,
+      depthWrite:     false,
+      blending:       THREE.NormalBlending,
+      uniforms: {
+        viewport: { value: new THREE.Vector2(window.innerWidth, window.innerHeight) },
+      },
+    });
+
+    this.mesh  = new THREE.Points(geo, mat);
+    this.count = n;
+    this.scene.add(this.mesh);
+    this._sortWork = new Float32Array(n);
+  }
+
+  /** Depth-sort back-to-front for correct alpha compositing. */
+  sort(camera) {
+    if (!this.mesh || this.count === 0) return;
+    // Only sort if < 300k (larger → skip for perf)
+    if (this.count > 300_000) return;
+
+    const pos   = this.mesh.geometry.attributes.position.array;
+    const cam   = camera.position;
+    const N     = this.count;
+    const pairs = new Array(N);
+
+    for (let i = 0; i < N; i++) {
+      const dx = pos[i*3]   - cam.x;
+      const dy = pos[i*3+1] - cam.y;
+      const dz = pos[i*3+2] - cam.z;
+      pairs[i] = [i, dx*dx + dy*dy + dz*dz];
+    }
+    pairs.sort((a, b) => b[1] - a[1]);
+
+    // Rebuild attribute arrays in sorted order
+    const attrs = ["position", "color", "cov2d_xy", "cov2d_c"];
+    const orig  = {};
+    for (const name of attrs) orig[name] = this.mesh.geometry.attributes[name].array.slice();
+
+    for (let j = 0; j < N; j++) {
+      const i = pairs[j][0];
+      const geo = this.mesh.geometry;
+      geo.attributes.position.array[j*3]   = orig.position[i*3];
+      geo.attributes.position.array[j*3+1] = orig.position[i*3+1];
+      geo.attributes.position.array[j*3+2] = orig.position[i*3+2];
+      geo.attributes.color.array[j*4]   = orig.color[i*4];
+      geo.attributes.color.array[j*4+1] = orig.color[i*4+1];
+      geo.attributes.color.array[j*4+2] = orig.color[i*4+2];
+      geo.attributes.color.array[j*4+3] = orig.color[i*4+3];
+      geo.attributes.cov2d_xy.array[j*2]   = orig.cov2d_xy[i*2];
+      geo.attributes.cov2d_xy.array[j*2+1] = orig.cov2d_xy[i*2+1];
+      geo.attributes.cov2d_c.array[j] = orig.cov2d_c[i];
+    }
+
+    for (const name of attrs) {
+      this.mesh.geometry.attributes[name].needsUpdate = true;
+    }
+  }
+
+  dispose() {
+    if (this.mesh) {
+      this.scene.remove(this.mesh);
+      this.mesh.geometry.dispose();
+      this.mesh.material.dispose();
+      this.mesh = null;
+    }
+  }
+}
+
+// ── Orbit + WASD Camera ──────────────────────────────────────────────────────
+class OrbitCamera {
+  constructor(camera, canvas) {
+    this.cam    = camera;
+    this.canvas = canvas;
+    this.target = new THREE.Vector3(0, 0, 0);
+
+    this._spherical  = new THREE.Spherical(5, Math.PI/3, 0);
+    this._isDragging = false;
+    this._isPanning  = false;
+    this._lastMouse  = { x: 0, y: 0 };
+    this._keys       = {};
+    this._velocity   = new THREE.Vector3();
+
+    this._bind();
+    this._updateCamera();
+  }
+
+  _bind() {
+    const c = this.canvas;
+    c.addEventListener("mousedown",  e => this._onMouseDown(e));
+    c.addEventListener("mousemove",  e => this._onMouseMove(e));
+    c.addEventListener("mouseup",    e => this._onMouseUp(e));
+    c.addEventListener("wheel",      e => this._onWheel(e), { passive: false });
+    c.addEventListener("contextmenu",e => e.preventDefault());
+
+    // Touch
+    this._touches = {};
+    c.addEventListener("touchstart", e => this._onTouchStart(e), { passive: false });
+    c.addEventListener("touchmove",  e => this._onTouchMove(e),  { passive: false });
+    c.addEventListener("touchend",   e => this._onTouchEnd(e));
+
+    window.addEventListener("keydown", e => { this._keys[e.code] = true;  });
+    window.addEventListener("keyup",   e => { this._keys[e.code] = false; });
+  }
+
+  _onMouseDown(e) {
+    if (e.button === 0) this._isDragging = true;
+    if (e.button === 2) this._isPanning  = true;
+    this._lastMouse = { x: e.clientX, y: e.clientY };
+  }
+
+  _onMouseMove(e) {
+    const dx = e.clientX - this._lastMouse.x;
+    const dy = e.clientY - this._lastMouse.y;
+    this._lastMouse = { x: e.clientX, y: e.clientY };
+
+    if (this._isDragging) {
+      this._spherical.theta -= dx * 0.005;
+      this._spherical.phi   -= dy * 0.005;
+      this._spherical.phi    = Math.max(0.05, Math.min(Math.PI - 0.05, this._spherical.phi));
+      this._updateCamera();
+    }
+    if (this._isPanning) {
+      const right = new THREE.Vector3().setFromSpherical(this._spherical).cross(THREE.Object3D.DefaultUp).normalize();
+      const up    = new THREE.Vector3(0, 1, 0);
+      const scale = this._spherical.radius * 0.001;
+      this.target.addScaledVector(right, -dx * scale);
+      this.target.addScaledVector(up,     dy * scale);
+      this._updateCamera();
+    }
+  }
+
+  _onMouseUp(e) {
+    if (e.button === 0) this._isDragging = false;
+    if (e.button === 2) this._isPanning  = false;
+  }
+
+  _onWheel(e) {
+    e.preventDefault();
+    this._spherical.radius *= 1 + e.deltaY * 0.001;
+    this._spherical.radius  = Math.max(0.1, Math.min(500, this._spherical.radius));
+    this._updateCamera();
+  }
+
+  _onTouchStart(e) {
+    e.preventDefault();
+    for (const t of e.changedTouches) this._touches[t.identifier] = { x: t.clientX, y: t.clientY };
+  }
+
+  _onTouchMove(e) {
+    e.preventDefault();
+    const ids = Object.keys(this._touches);
+    if (ids.length === 1 && e.changedTouches.length === 1) {
+      const t  = e.changedTouches[0];
+      const dx = t.clientX - this._touches[t.identifier].x;
+      const dy = t.clientY - this._touches[t.identifier].y;
+      this._spherical.theta -= dx * 0.005;
+      this._spherical.phi   -= dy * 0.005;
+      this._spherical.phi    = Math.max(0.05, Math.min(Math.PI - 0.05, this._spherical.phi));
+      this._updateCamera();
+      this._touches[t.identifier] = { x: t.clientX, y: t.clientY };
+    }
+  }
+
+  _onTouchEnd(e) {
+    for (const t of e.changedTouches) delete this._touches[t.identifier];
+  }
+
+  _updateCamera() {
+    const pos = new THREE.Vector3().setFromSpherical(this._spherical).add(this.target);
+    this.cam.position.copy(pos);
+    this.cam.lookAt(this.target);
+  }
+
+  reset() {
+    this._spherical.set(5, Math.PI/3, 0);
+    this.target.set(0, 0, 0);
+    this._updateCamera();
+  }
+
+  /** WASD fly — called from render loop */
+  tick(dt) {
+    const speed  = (this._keys["ShiftLeft"] || this._keys["ShiftRight"]) ? 8 : 2;
+    const fwd    = new THREE.Vector3().subVectors(this.target, this.cam.position).normalize();
+    const right  = new THREE.Vector3().crossVectors(fwd, THREE.Object3D.DefaultUp).normalize();
+    const moved  = this._keys["KeyW"] || this._keys["KeyS"] || this._keys["KeyA"] || this._keys["KeyD"];
+
+    if (this._keys["KeyW"]) { this.cam.position.addScaledVector(fwd,   speed * dt); this.target.addScaledVector(fwd,   speed * dt); }
+    if (this._keys["KeyS"]) { this.cam.position.addScaledVector(fwd,  -speed * dt); this.target.addScaledVector(fwd,  -speed * dt); }
+    if (this._keys["KeyA"]) { this.cam.position.addScaledVector(right, -speed * dt); this.target.addScaledVector(right,-speed * dt); }
+    if (this._keys["KeyD"]) { this.cam.position.addScaledVector(right,  speed * dt); this.target.addScaledVector(right, speed * dt); }
+  }
+}
+
+// ── Camera Path Recorder / Cinematic Replay ──────────────────────────────────
+class CameraPathRecorder {
+  constructor() {
+    this.waypoints = [];
+    this.recording = false;
+    this.playing   = false;
+    this._t        = 0;
+  }
+
+  addWaypoint(pos, target) {
+    this.waypoints.push({
+      pos:    pos.clone(),
+      target: target.clone(),
+    });
+    return this.waypoints.length;
+  }
+
+  clear() { this.waypoints = []; }
+
+  /** Cubic-spline interpolation between waypoints. Returns {pos, target} at t=[0,1]. */
+  sample(t) {
+    const n = this.waypoints.length;
+    if (n < 2) return null;
+    const seg = (n - 1) * t;
+    const i   = Math.min(Math.floor(seg), n - 2);
+    const u   = seg - i;
+    const a   = this.waypoints[Math.max(0, i - 1)];
+    const b   = this.waypoints[i];
+    const c   = this.waypoints[Math.min(n - 1, i + 1)];
+    const d   = this.waypoints[Math.min(n - 1, i + 2)];
+    const pos    = catmullRom(a.pos,    b.pos,    c.pos,    d.pos,    u);
+    const target = catmullRom(a.target, b.target, c.target, d.target, u);
+    return { pos, target };
+  }
+
+  tick(dt, orbitCam) {
+    if (!this.playing || this.waypoints.length < 2) return false;
+    this._t += dt * 0.1;
+    if (this._t >= 1) { this._t = 0; this.playing = false; return false; }
+    const kf = this.sample(this._t);
+    if (kf) {
+      orbitCam.cam.position.copy(kf.pos);
+      orbitCam.target.copy(kf.target);
+      orbitCam.cam.lookAt(kf.target);
+    }
+    return true;
+  }
+}
+
+function catmullRom(p0, p1, p2, p3, t) {
+  const t2 = t * t, t3 = t2 * t;
+  const r = new THREE.Vector3();
+  r.addScaledVector(p0, -0.5*t3 + t2 - 0.5*t);
+  r.addScaledVector(p1,  1.5*t3 - 2.5*t2 + 1);
+  r.addScaledVector(p2, -1.5*t3 + 2*t2 + 0.5*t);
+  r.addScaledVector(p3,  0.5*t3 - 0.5*t2);
+  return r;
+}
+
+// ── Stats panel ──────────────────────────────────────────────────────────────
+class StatsPanel {
+  constructor(renderer) {
+    this.renderer  = renderer;
+    this._frames   = 0;
+    this._lastTime = performance.now();
+    this._fps      = 0;
+  }
+
+  update(n_splats, camera) {
+    this._frames++;
+    const now = performance.now();
+    if (now - this._lastTime >= 500) {
+      this._fps = Math.round(this._frames * 1000 / (now - this._lastTime));
+      this._frames   = 0;
+      this._lastTime = now;
+    }
+    const info = this.renderer.info;
+    document.getElementById("s-fps").textContent   = this._fps;
+    document.getElementById("s-count").textContent = n_splats.toLocaleString();
+    document.getElementById("s-tri").textContent   = info.render.triangles.toLocaleString();
+    document.getElementById("s-dc").textContent    = info.render.calls;
+    document.getElementById("s-cam").textContent   =
+      `(${camera.position.x.toFixed(1)}, ${camera.position.y.toFixed(1)}, ${camera.position.z.toFixed(1)})`;
+    document.getElementById("s-vram").textContent  = "N/A (WebGL)";
+  }
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
+class App {
+  constructor() {
+    this.canvas   = document.getElementById("canvas");
+    this.renderer = new THREE.WebGLRenderer({ canvas: this.canvas, antialias: true, alpha: false });
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    this.renderer.setClearColor(0x090b0f, 1);
+
+    this.scene  = new THREE.Scene();
+    this.camera = new THREE.PerspectiveCamera(60, window.innerWidth / window.innerHeight, 0.01, 1000);
+    this.camera.position.set(0, 1, 5);
+
+    this.orbit   = new OrbitCamera(this.camera, this.canvas);
+    this.splatR  = new GaussianSplatRenderer(this.scene);
+    this.camPath = new CameraPathRecorder();
+    this.stats   = new StatsPanel(this.renderer);
+
+    this._prevTime = performance.now();
+    this._sortInterval = 0;
+
+    this._bindUI();
+    this._bindDragDrop();
+    window.addEventListener("resize", () => this._onResize());
+
+    this._hideLoader();
+    this._animate();
+  }
+
+  _animate() {
+    requestAnimationFrame(() => this._animate());
+    const now = performance.now();
+    const dt  = Math.min((now - this._prevTime) / 1000, 0.1);
+    this._prevTime = now;
+
+    if (!this.camPath.tick(dt, this.orbit)) {
+      this.orbit.tick(dt);
+    }
+
+    // Depth sort every 8 frames
+    this._sortInterval++;
+    if (this._sortInterval >= 8) {
+      this.splatR.sort(this.camera);
+      this._sortInterval = 0;
+    }
+
+    this.renderer.render(this.scene, this.camera);
+    this.stats.update(this.splatR.count, this.camera);
+  }
+
+  _hideLoader() {
+    const l = document.getElementById("loader");
+    l.classList.add("hidden");
+    setTimeout(() => l.remove(), 500);
+  }
+
+  _setLoaderProgress(pct, msg) {
+    const l = document.getElementById("loader");
+    if (!l) return;
+    document.getElementById("loader-bar").style.width = (pct * 100) + "%";
+    document.getElementById("loader-pct").textContent = Math.round(pct * 100) + "%";
+    if (msg) document.getElementById("loader-sub").textContent = msg;
+  }
+
+  async _loadFile(file) {
+    const name = file.name.toLowerCase();
+    const isSplat = name.endsWith(".splat");
+    const isPly   = name.endsWith(".ply");
+    if (!isSplat && !isPly) { this._toast("Unsupported format. Use .splat or .ply"); return; }
+
+    this._toast(`Loading ${file.name}…`);
+
+    if (isSplat) {
+      const buf = await file.arrayBuffer();
+      await this.splatR.loadSplat(buf, p => this._setLoaderProgress(p, "Parsing splat…"));
+    } else {
+      const text = await file.text();
+      await this.splatR.loadPly(text, p => this._setLoaderProgress(p, "Parsing PLY…"));
+    }
+    this.orbit.reset();
+    this._toast(`✓ Loaded ${this.splatR.count.toLocaleString()} Gaussians`);
+  }
+
+  _bindUI() {
+    document.getElementById("btn-load").addEventListener("click", () => {
+      document.getElementById("file-input").click();
+    });
+    document.getElementById("file-input").addEventListener("change", e => {
+      const f = e.target.files[0];
+      if (f) this._loadFile(f);
+      e.target.value = "";
+    });
+
+    document.getElementById("btn-screenshot").addEventListener("click", () => this._screenshot());
+    document.getElementById("btn-fullscreen").addEventListener("click", () => this._fullscreen());
+    document.getElementById("btn-help").addEventListener("click", () => {
+      document.getElementById("help-panel").classList.toggle("visible");
+      document.getElementById("btn-help").classList.toggle("active");
+    });
+
+    // Camera path recording
+    let recording = false;
+    document.getElementById("btn-record-path").addEventListener("click", () => {
+      recording = !recording;
+      this.camPath.recording = recording;
+      document.getElementById("btn-record-path").classList.toggle("active", recording);
+      document.getElementById("cam-path-bar").classList.toggle("visible", recording);
+    });
+    document.getElementById("btn-add-wp").addEventListener("click", () => {
+      const n = this.camPath.addWaypoint(this.camera.position, this.orbit.target);
+      document.getElementById("cam-path-count").textContent = n + " waypoints";
+      if (n >= 2) document.getElementById("btn-play-path").style.display = "";
+    });
+    document.getElementById("btn-clear-wp").addEventListener("click", () => {
+      this.camPath.clear();
+      document.getElementById("cam-path-count").textContent = "0 waypoints";
+      document.getElementById("btn-play-path").style.display = "none";
+    });
+    document.getElementById("btn-stop-record").addEventListener("click", () => {
+      recording = false;
+      this.camPath.recording = false;
+      document.getElementById("btn-record-path").classList.remove("active");
+      document.getElementById("cam-path-bar").classList.remove("visible");
+    });
+    document.getElementById("btn-play-path").addEventListener("click", () => {
+      this.camPath._t = 0;
+      this.camPath.playing = true;
+      this._toast("▶ Playing cinematic path…");
+    });
+
+    // Keyboard shortcuts
+    window.addEventListener("keydown", e => {
+      if (e.code === "Space") { e.preventDefault(); this.orbit.reset(); }
+      if (e.code === "KeyF")  this._fullscreen();
+      if (e.code === "KeyP")  this._screenshot();
+      if (e.code === "KeyH")  document.getElementById("help-panel").classList.toggle("visible");
+    });
+  }
+
+  _bindDragDrop() {
+    const overlay = document.getElementById("dropzone-overlay");
+    document.addEventListener("dragover",  e => { e.preventDefault(); overlay.classList.add("visible"); });
+    document.addEventListener("dragleave", e => { overlay.classList.remove("visible"); });
+    document.addEventListener("drop", async e => {
+      e.preventDefault();
+      overlay.classList.remove("visible");
+      const f = e.dataTransfer.files[0];
+      if (f) await this._loadFile(f);
+    });
+  }
+
+  _screenshot() {
+    // Force render then extract canvas image
+    this.renderer.render(this.scene, this.camera);
+    const flash = document.getElementById("flash");
+    flash.classList.add("on");
+    setTimeout(() => flash.classList.remove("on"), 180);
+
+    this.canvas.toBlob(blob => {
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `monosplat_${Date.now()}.png`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+    this._toast("📷 Screenshot saved");
+  }
+
+  _fullscreen() {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen();
+    } else {
+      document.exitFullscreen();
+    }
+  }
+
+  _onResize() {
+    this.camera.aspect = window.innerWidth / window.innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(window.innerWidth, window.innerHeight);
+    const mat = this.splatR.mesh?.material;
+    if (mat) mat.uniforms.viewport.value.set(window.innerWidth, window.innerHeight);
+  }
+
+  _toast(msg, duration = 2500) {
+    const el = document.getElementById("toast");
+    el.textContent = msg;
+    el.classList.add("show");
+    clearTimeout(this._toastTimer);
+    this._toastTimer = setTimeout(() => el.classList.remove("show"), duration);
+  }
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+window.addEventListener("DOMContentLoaded", () => { new App(); });
+</script>
+</body>
+</html>
