@@ -1,67 +1,91 @@
-# ── Python ─────────────────────────────────────────────────────────
-__pycache__/
-*.py[cod]
-*.pyo
-*.pyd
-.Python
-*.egg-info/
-dist/
-build/
-*.egg
+# ── MonoSplat Runtime Artifacts ────────────────────────────────────
 
-# ── Virtual Environment ────────────────────────────────────────────
-venv/
-.env/
-env/
-
-# ── Data (large files — store separately) ──────────────────────────
-data/raw/*
-data/processed/*
-data/colmap_output/*
-!data/raw/.gitkeep
-!data/processed/.gitkeep
-!data/colmap_output/.gitkeep
-
-# ── Models (large files — use Git LFS or Drive) ────────────────────
-models/gaussian/*
-models/checkpoints/*
-!models/gaussian/.gitkeep
-!models/checkpoints/.gitkeep
-
-# ── Outputs ────────────────────────────────────────────────────────
-outputs/renders/*
-outputs/logs/*
-outputs/videos/*
-!outputs/renders/.gitkeep
-!outputs/logs/.gitkeep
-!outputs/videos/.gitkeep
-
-# ── Work directory (job processing files) ──────────────────────────
-work/
+# Local uploads and processing
 uploads/
+work/
 
-# ── Archives (IMPORTANT: prevent accidental zip uploads to Colab) ──
-# Covers: src.zip, cd24904e9fa0_for_colab.zip, and any other archives
-*.zip
-*.tar
-*.gz
-*.7z
-*.rar
-*.tar.gz
-*.tar.bz2
+# Colab export archives
+*_for_colab.zip
+*_colab.zip
+colab_export.zip
 
-# ── Jupyter ────────────────────────────────────────────────────────
-.ipynb_checkpoints/
+# Gaussian outputs
+*.ply
+*.splat
+*.ckpt
+*.pt
+*.pth
+*.pkl
 
-# ── IDE ────────────────────────────────────────────────────────────
-.vscode/
-.idea/
-*.swp
-*.swo
+# Training metrics and analytics
+metrics.json
+training_log.txt
+analytics.json
 
-# ── OS ─────────────────────────────────────────────────────────────
-.DS_Store
-Thumbs.db
+# Render previews
+preview/
+previews/
+renders/
+viewer_exports/
 
-# ── Logs ───────────────────────────────────────────────────────────
-*.log
+# Temporary training files
+tmp/
+temp/
+cache/
+.cache/
+
+# CUDA / Torch compile cache
+~/.nv/
+torch_extensions/
+*.cu.o
+*.cubin
+
+# COLMAP generated files
+database.db
+*.bin
+*.txt.bak
+
+# Large reconstruction artifacts
+sparse/
+dense/
+stereo/
+
+# Notebook execution artifacts
+*.ipynb_checkpoints
+
+# Windows-specific junk
+desktop.ini
+$RECYCLE.BIN/
+
+# PyTorch profiler outputs
+*.trace.json
+
+# Runtime crash dumps
+*.dmp
+
+# Tensorboard
+runs/
+events.out.tfevents.*
+
+# FFmpeg temp files
+*.mp4.tmp
+*.avi.tmp
+
+# Generated thumbnails/previews
+thumbs/
+thumbnails/
+
+# Ignore all job folders inside work
+work/**
+
+# Ignore all uploaded videos/images
+uploads/**
+
+# Ignore local dataset copies
+datasets/
+videos/
+captures/
+
+# Ignore compressed training outputs
+*.xz
+*.lz4

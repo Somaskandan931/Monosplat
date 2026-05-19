@@ -240,16 +240,51 @@ class GaussianTrainer:
             loss_val      = loss.item()
             running_loss += loss_val
 
-            # SH degree scheduling
-            if it % 1000 == 0:
+            # Progressive SH degree scheduling (VRAM-aware)
+            # Schedule: SH0 → SH1 at iter 1000, SH1 → SH2 at 3000,
+            # SH2 → SH3 at 7000 (only if VRAM headroom allows).
+            # This avoids the sudden complexity jump that causes NaN cascades.
+            if it == 1000:
                 self.model.oneup_sh_degree()
+                print(f"[Trainer] SH degree → {self.model.active_sh_degree} at iter {it}")
+            elif it == 3000:
+                self.model.oneup_sh_degree()
+                print(f"[Trainer] SH degree → {self.model.active_sh_degree} at iter {it}")
+            elif it == 7000:
+                # Only advance to SH3 if VRAM is not under pressure
+                _sh_vram_ok = True
+                if self.device == "cuda":
+                    try:
+                        torch.cuda.synchronize()
+                        _vram_alloc = torch.cuda.memory_allocated() / 1e9
+                        _vram_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+                        _sh_vram_ok = (_vram_alloc / _vram_total) < 0.75
+                    except Exception:
+                        _sh_vram_ok = False
+                if _sh_vram_ok:
+                    self.model.oneup_sh_degree()
+                    print(f"[Trainer] SH degree → {self.model.active_sh_degree} at iter {it}")
+                else:
+                    print(f"[Trainer] SH3 upgrade skipped at iter {it}: VRAM > 75%")
 
-            # Densification
+            # Densification (VRAM-guarded)
             if densify_from <= it <= densify_until and it % densify_interval == 0:
-                self._densify_and_prune(
-                    grad_threshold=grad_threshold,
-                    percent_dense=percent_dense,
-                )
+                _densify_ok = True
+                if self.device == "cuda":
+                    try:
+                        torch.cuda.synchronize()
+                        _vram_alloc = torch.cuda.memory_allocated() / 1e9
+                        _vram_total = torch.cuda.get_device_properties(0).total_memory / 1e9
+                        if _vram_alloc / _vram_total > 0.85:
+                            _densify_ok = False
+                            print(f"[Trainer] Densification skipped at iter {it}: VRAM {_vram_alloc:.1f}/{_vram_total:.1f}GB")
+                    except Exception:
+                        pass
+                if _densify_ok:
+                    self._densify_and_prune(
+                        grad_threshold=grad_threshold,
+                        percent_dense=percent_dense,
+                    )
 
             # Opacity reset
             if it > 0 and it % opacity_reset_interval == 0 and it < densify_until:
@@ -257,7 +292,7 @@ class GaussianTrainer:
 
             # Checkpoint
             if it > 0 and it % save_every == 0:
-                self._save(it)
+                self._save(it, loss_val)
 
             # Eval
             if it > 0 and it % eval_every == 0 and self.test_cameras:
@@ -267,7 +302,21 @@ class GaussianTrainer:
             if it > 0 and it % 500 == 0:
                 self._save_preview(it, camera)
 
-            pbar.set_postfix({"loss": f"{loss_val:.4f}", "N": f"{len(self.model):,}", "NaN": nan_count})
+            if it % 100 == 0 and self.device == "cuda":
+                try:
+                    torch.cuda.synchronize()
+                    _pbar_vram = torch.cuda.memory_allocated() / 1e9
+                except Exception:
+                    _pbar_vram = 0.0
+            else:
+                _pbar_vram = getattr(self, "_last_vram", 0.0)
+            self._last_vram = _pbar_vram
+            pbar.set_postfix({
+                "loss": f"{loss_val:.4f}",
+                "N": f"{len(self.model):,}",
+                "VRAM": f"{_pbar_vram:.2f}G",
+                "NaN": nan_count,
+            })
 
             if on_iter_callback and it > 0 and it % callback_every == 0:
                 avg_loss     = running_loss / callback_every
@@ -290,7 +339,7 @@ class GaussianTrainer:
             if self.device == "cuda" and it % 500 == 0:
                 torch.cuda.empty_cache()
 
-        self._save(iterations)
+        self._save(iterations, loss_val)
         print(f"[Trainer] Training complete. Output: {self.output_dir}")
         if nan_count:
             print(f"[Trainer] Total NaN iterations skipped: {nan_count}")
@@ -487,17 +536,27 @@ class GaussianTrainer:
     # Save / resume
     # ------------------------------------------------------------------
 
-    def _save(self, iteration: int) -> None:
+    def _save(self, iteration: int, loss: float = 0.0) -> None:
         ply_path  = self.output_dir / f"point_cloud_iter_{iteration:06d}.ply"
-        ckpt_path = self.ckpt_dir   / f"checkpoint_{iteration:06d}.pkl"
+        ckpt_path = self.ckpt_dir   / f"checkpoint_{iteration:06d}.ckpt"
         save_ply(str(ply_path), self.model.get_state())
         save_checkpoint(str(ckpt_path), {
-            "iteration":   iteration,
-            "model_state": self.model.state_dict(),
+            "iteration":       iteration,
+            "model_state":     self.model.state_dict(),
+            "optimizer_state": self.optimizer.state_dict(),
+            "n_gaussians":     len(self.model),
+            "sh_degree":       self.model.active_sh_degree,
+            "loss":            float(loss),
         })
 
     def resume_from_checkpoint(self, ckpt_path: str) -> int:
         state = load_checkpoint(ckpt_path)
         self.model.load_state_dict(state["model_state"])
-        print(f"[Trainer] Resumed from iteration {state['iteration']}")
+        if "optimizer_state" in state:
+            try:
+                self.optimizer.load_state_dict(state["optimizer_state"])
+            except Exception as e:
+                print(f"[Trainer] Optimizer state mismatch (ignored): {e}")
+        print(f"[Trainer] Resumed from iteration {state['iteration']}  ")
+        print(f"[Trainer]   Gaussians: {state.get('n_gaussians', '?'):,}  loss: {state.get('loss', '?')}")
         return state["iteration"]

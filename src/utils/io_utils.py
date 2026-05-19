@@ -111,22 +111,78 @@ def save_image(path: str, img: np.ndarray) -> None:
 # ---------------------------------------------------------------------------
 
 def save_checkpoint(path: str, state: Dict[str, Any]) -> None:
-    """Save training checkpoint using torch.save (safe across Python versions)."""
+    """
+    Save training checkpoint using torch.save with atomic write.
+
+    The state dict should include:
+        model_state     : model.state_dict()
+        optimizer_state : optimizer.state_dict()
+        iteration       : int
+        loss            : float
+        n_gaussians     : int
+        sh_degree       : int  (optional)
+        config_snapshot : dict (optional)
+        metrics_snapshot: list (optional)
+
+    The file is always written in PyTorch format regardless of the
+    extension the caller provides.  A .ckpt extension is preferred;
+    legacy .pkl paths are accepted but silently upgraded.
+    """
+    import hashlib
     import torch
+
     path = Path(path)
+    # Upgrade legacy .pkl extension transparently
+    if path.suffix == ".pkl":
+        path = path.with_suffix(".ckpt")
     path.parent.mkdir(parents=True, exist_ok=True)
-    # Use a .pt extension internally; the caller may pass .pkl — we honour the
-    # given path but write torch format regardless.
-    torch.save(state, str(path))
-    print(f"[io] Checkpoint saved → {path}")
+
+    tmp_path = path.with_suffix(".tmp")
+    torch.save(state, str(tmp_path))
+    tmp_path.rename(path)           # atomic on POSIX
+
+    # Write a tiny integrity marker (file size) next to the checkpoint
+    # so load_checkpoint can detect truncation.
+    size = path.stat().st_size
+    marker_path = path.with_suffix(".ckpt.sz")
+    marker_path.write_text(str(size))
+
+    print(f"[io] Checkpoint saved → {path}  ({size/1e6:.1f} MB)")
 
 
 def load_checkpoint(path: str) -> Dict[str, Any]:
-    """Load training checkpoint saved by save_checkpoint."""
+    """
+    Load training checkpoint saved by save_checkpoint.
+
+    Validates file size against the .sz marker if present to detect
+    truncation/corruption before attempting to unpickle.
+    """
     import torch
+
     path = Path(path)
+    # Accept legacy .pkl extension — look for .ckpt equivalent first
+    if path.suffix == ".pkl":
+        upgraded = path.with_suffix(".ckpt")
+        if upgraded.exists():
+            path = upgraded
+
     if not path.exists():
         raise FileNotFoundError(f"Checkpoint not found: {path}")
+
+    # Integrity check
+    marker_path = path.with_suffix(".ckpt.sz")
+    if marker_path.exists():
+        try:
+            expected_size = int(marker_path.read_text().strip())
+            actual_size   = path.stat().st_size
+            if actual_size != expected_size:
+                raise ValueError(
+                    f"Checkpoint size mismatch: expected {expected_size} bytes, "
+                    f"got {actual_size} bytes. File may be corrupted or truncated."
+                )
+        except ValueError as e:
+            raise ValueError(f"Checkpoint integrity check failed for {path}: {e}") from e
+
     state = torch.load(str(path), map_location="cpu", weights_only=False)
     print(f"[io] Checkpoint loaded ← {path}")
     return state

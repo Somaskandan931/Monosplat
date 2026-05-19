@@ -1,0 +1,173 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="AutoImportSettings">
+    <option name="autoReloadType" value="SELECTIVE" />
+  </component>
+  <component name="ChangeListManager">
+    <list default="true" id="89cd2aa2-4dca-4407-ae3e-666e58d4b988" name="Changes" comment="">
+      <change beforePath="$PROJECT_DIR$/models/registry.json" beforeDir="false" afterPath="$PROJECT_DIR$/models/registry.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/notebooks/monosplat_colab_gpu.ipynb" beforeDir="false" afterPath="$PROJECT_DIR$/notebooks/monosplat_colab_gpu.ipynb" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/requirements-lock.txt" beforeDir="false" afterPath="$PROJECT_DIR$/requirements-lock.txt" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/__init__.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/__init__.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/reconstruction/trainer.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/reconstruction/trainer.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/io_utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/io_utils.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/src/utils/metrics.py" beforeDir="false" afterPath="$PROJECT_DIR$/src/utils/metrics.py" afterDir="false" />
+    </list>
+    <option name="SHOW_DIALOG" value="false" />
+    <option name="HIGHLIGHT_CONFLICTS" value="true" />
+    <option name="HIGHLIGHT_NON_ACTIVE_CHANGELIST" value="false" />
+    <option name="LAST_RESOLUTION" value="IGNORE" />
+  </component>
+  <component name="FileTemplateManagerImpl">
+    <option name="RECENT_TEMPLATES">
+      <list>
+        <option value="Python Script" />
+      </list>
+    </option>
+  </component>
+  <component name="Git.Settings">
+    <option name="RECENT_GIT_ROOT_PATH" value="$PROJECT_DIR$" />
+  </component>
+  <component name="GitHubPullRequestSearchHistory">{
+  &quot;lastFilter&quot;: {
+    &quot;state&quot;: &quot;OPEN&quot;,
+    &quot;assignee&quot;: &quot;Somaskandan931&quot;
+  }
+}</component>
+  <component name="GithubPullRequestsUISettings">{
+  &quot;selectedUrlAndAccountId&quot;: {
+    &quot;url&quot;: &quot;https://github.com/Somaskandan931/Monosplat.git&quot;,
+    &quot;accountId&quot;: &quot;5ec63760-78d3-472c-b8fd-b1c0514162d2&quot;
+  }
+}</component>
+  <component name="McpProjectServerCommands">
+    <commands />
+    <urls />
+  </component>
+  <component name="ProjectColorInfo">{
+  &quot;customColor&quot;: &quot;&quot;,
+  &quot;associatedIndex&quot;: 8
+}</component>
+  <component name="ProjectId" id="3BL3SqCjreLfJMCswapnVqjeHlQ" />
+  <component name="ProjectViewState">
+    <option name="hideEmptyMiddlePackages" value="true" />
+    <option name="showLibraryContents" value="true" />
+    <option name="sortByType" value="true" />
+    <option name="sortKey" value="BY_TYPE" />
+  </component>
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;Python.python -c \&quot;import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))\&quot;.executor&quot;: &quot;Run&quot;,
+    &quot;Python.python scripts/zip_for_colab.py &lt;job_id&gt;.executor&quot;: &quot;Run&quot;,
+    &quot;RunOnceActivity.MCP Project settings loaded&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager.252&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;SHELLCHECK.PATH&quot;: &quot;C:\\Users\\somas\\AppData\\Roaming\\JetBrains\\PyCharm2025.3\\plugins\\Shell Script\\shellcheck.exe&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;last_opened_file_path&quot;: &quot;D:/PycharmProjects/monosplat&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;terminal&quot;
+  },
+  &quot;keyToStringList&quot;: {
+    &quot;com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File&quot;: [
+      &quot;TEXT&quot;
+    ],
+    &quot;stardust.markdown.MarkdownSplitEditorSuppressor:keyList&quot;: []
+  }
+}</component>
+  <component name="RecentsManager">
+    <key name="CopyFile.RECENT_KEYS">
+      <recent name="D:\PycharmProjects\monosplat" />
+      <recent name="D:\PycharmProjects\monosplat\scripts" />
+      <recent name="D:\PycharmProjects\monosplat\docs" />
+      <recent name="D:\PycharmProjects\monosplat\web" />
+      <recent name="D:\PycharmProjects\monosplat\config" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="D:\PycharmProjects\monosplat" />
+      <recent name="D:\PycharmProjects\monosplat\work\2e9c989b96ce\models\gaussian" />
+      <recent name="D:\PycharmProjects\monosplat\web" />
+      <recent name="D:\PycharmProjects\monosplat\src\utils" />
+      <recent name="D:\PycharmProjects\monosplat\src\renderer" />
+    </key>
+  </component>
+  <component name="RunAnythingCache">
+    <option name="myCommands">
+      <command value="pip uninstall torch torchvision torchaudio -y" />
+      <command value="pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121" />
+    </option>
+  </component>
+  <component name="RunManager" selected="Python.python -c &quot;import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))&quot;">
+    <configuration name="python -c &quot;import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))&quot;" type="PythonConfigurationType" factoryName="Python" temporary="true">
+      <module name="monosplat" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="-c" />
+      <option name="PARAMETERS" value="&quot;import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))&quot;" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <configuration name="python scripts/zip_for_colab.py &lt;job_id&gt;" type="PythonConfigurationType" factoryName="Python" temporary="true">
+      <module name="monosplat" />
+      <option name="ENV_FILES" value="" />
+      <option name="INTERPRETER_OPTIONS" value="" />
+      <option name="PARENT_ENVS" value="true" />
+      <envs>
+        <env name="PYTHONUNBUFFERED" value="1" />
+      </envs>
+      <option name="SDK_HOME" value="" />
+      <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+      <option name="IS_MODULE_SDK" value="true" />
+      <option name="ADD_CONTENT_ROOTS" value="true" />
+      <option name="ADD_SOURCE_ROOTS" value="true" />
+      <option name="RUN_TOOL" value="" />
+      <option name="SCRIPT_NAME" value="scripts/zip_for_colab.py" />
+      <option name="PARAMETERS" value="&lt;job_id&gt;" />
+      <option name="SHOW_COMMAND_LINE" value="false" />
+      <option name="EMULATE_TERMINAL" value="false" />
+      <option name="MODULE_MODE" value="false" />
+      <option name="REDIRECT_INPUT" value="false" />
+      <option name="INPUT_FILE" value="" />
+      <method v="2" />
+    </configuration>
+    <recent_temporary>
+      <list>
+        <item itemvalue="Python.python scripts/zip_for_colab.py &lt;job_id&gt;" />
+        <item itemvalue="Python.python -c &quot;import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))&quot;" />
+        <item itemvalue="Python.python -c &quot;import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))&quot;" />
+      </list>
+    </recent_temporary>
+  </component>
+  <component name="SharedIndexes">
+    <attachedChunks>
+      <set>
+        <option value="bundled-python-sdk-f2b7a9f6281b-6e1f45a539f7-com.jetbrains.pycharm.pro.sharedIndexes.bundled-PY-253.29346.142" />
+      </set>
+    </attachedChunks>
+  </component>
+  <component name="TaskManager">
+    <task active="true" id="Default" summary="Default task">
+      <changelist id="89cd2aa2-4dca-4407-ae3e-666e58d4b988" name="Changes" comment="" />
+      <created>1774254527511</created>
+      <option name="number" value="Default" />
+      <option name="presentableId" value="Default" />
+      <updated>1774254527511</updated>
+    </task>
+    <servers />
+  </component>
+</project>

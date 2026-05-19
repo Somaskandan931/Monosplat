@@ -1,48 +1,64 @@
 # requirements-lock.txt
 # ─────────────────────────────────────────────────────────────────────────────
 # EXACT pinned pip dependencies for MonoSplat.
-# Generated against: Python 3.10, CUDA 11.8, PyTorch 2.1.0
+# Tested on: Python 3.10, CUDA 11.8, PyTorch 2.1.2, Colab T4
 #
-# Install with:
-#   pip install -r requirements-lock.txt
-#
-# For PyTorch (must match CUDA version), install FIRST before this file:
-#   pip install torch==2.1.0+cu118 torchvision==0.16.0+cu118 \
+# PYTORCH — install FIRST before this file:
+#   pip install torch==2.1.2+cu118 torchvision==0.16.2+cu118 \
 #       --index-url https://download.pytorch.org/whl/cu118
 #
-# Do NOT `pip install -r requirements-lock.txt` without installing PyTorch first
-# — pip will pull a CPU-only torch from PyPI.
+# Then:
+#   pip install -r requirements-lock.txt
+#
+# Version policy
+# ──────────────
+# gsplat: pinned to 1.5.x range (1.4.x minimum tested; 2.x untested).
+#         The src/external/gsplat_compat.py wrapper enforces version checks
+#         at runtime and warns if outside the tested window.
+# numpy:  <2.0 required — numpy 2.x breaks many scientific packages.
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Core (install torch separately, see above) ───────────────────────────────
-numpy==1.24.4
+# ── PyTorch (install separately with CUDA wheel, see above) ──────────────────
+# torch==2.1.2+cu118
+# torchvision==0.16.2+cu118
+
+# ── Core numerical ───────────────────────────────────────────────────────────
+numpy==1.26.4          # <2.0 to avoid numpy 2.x breaking changes
 scipy==1.11.4
 
 # ── Image / Video ────────────────────────────────────────────────────────────
-Pillow==10.0.1
-imageio==2.31.6
-opencv-python==4.8.1.78
+Pillow==10.3.0
+imageio==2.34.1
+opencv-python-headless==4.9.0.80   # headless avoids libGL deps in Colab
 
 # ── 3D Gaussian Splatting ─────────────────────────────────────────────────────
-gsplat==1.3.0
-plyfile==0.8.1
+# gsplat 1.5.x — tested window; src/external/gsplat_compat.py validates this
+gsplat==1.5.3
+plyfile==0.9
 
 # ── Training quality metrics ─────────────────────────────────────────────────
 pytorch-msssim==0.2.1
 lpips==0.1.4
 
 # ── Web server ───────────────────────────────────────────────────────────────
-fastapi==0.104.1
-uvicorn[standard]==0.24.0
-python-multipart==0.0.6
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+python-multipart==0.0.9
 aiofiles==23.2.1
 websockets==12.0
-starlette==0.27.0
+starlette==0.37.2
 
 # ── Config / utilities ───────────────────────────────────────────────────────
 pyyaml==6.0.1
-tqdm==4.66.1
+tqdm==4.66.4
+rich==13.7.1
+
+# ── Notebook ─────────────────────────────────────────────────────────────────
+matplotlib==3.8.4
 
 # ── Task queue ───────────────────────────────────────────────────────────────
-rq==1.16.0
-redis==5.0.1
+rq==1.16.1
+redis==5.0.4
+
+# ── Misc I/O ─────────────────────────────────────────────────────────────────
+trimesh==4.3.2
