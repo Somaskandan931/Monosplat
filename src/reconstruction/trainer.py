@@ -287,9 +287,9 @@ class GaussianTrainer:
 
         densify_from     = getattr(cfg, "densify_from_iter", 500)
         densify_until    = getattr(cfg, "densify_until_iter", 15000)
-        densify_interval = getattr(cfg, "densification_interval", 100)
-        base_grad_thr    = getattr(cfg, "densify_grad_threshold", 0.0002)
-        percent_dense    = getattr(cfg, "percent_dense", 0.01)
+        densify_interval = getattr(cfg, "densification_interval", 50)
+        base_grad_thr    = getattr(cfg, "densify_grad_threshold", 0.0001)
+        percent_dense    = getattr(cfg, "percent_dense", 0.03)
         opacity_reset_interval = getattr(cfg, "opacity_reset_interval", 3000)
         lambda_dssim     = getattr(cfg, "lambda_dssim", 0.2)
 
@@ -304,10 +304,13 @@ class GaussianTrainer:
         consecutive_nan = 0
         last_good_ckpt: Optional[str] = None
 
+        import time as _time
         pbar = tqdm(range(start_iter, iterations), desc="Training", dynamic_ncols=True)
 
         for it in pbar:
+            t_iter_start = _time.time()
             idx = np.random.randint(len(self.cameras))
+
             camera = self.cameras[idx]
             gt_img = self.images[idx].to(self.device, non_blocking=True)
 
@@ -375,10 +378,20 @@ class GaussianTrainer:
             if densify_from <= it <= densify_until and it % densify_interval == 0:
                 if self._vram_ok(threshold=0.85):
                     adaptive_thr = self._adaptive_grad_threshold(base_grad_thr)
-                    self._densify_and_prune(
+                    dens = self._densify_and_prune(
                         grad_threshold=adaptive_thr,
                         percent_dense=percent_dense,
                     )
+                    log.info(
+                        "[Densify] iter=%d  N=%d->%d  clone=%d  split_children=%d  prune=%d",
+                        it,
+                        dens["n_before"],
+                        dens["n_after"],
+                        dens["n_clone"],
+                        dens["n_split_children"],
+                        dens["n_prune"],
+                    )
+
                     # Over-pruning guard
                     if self._convergence.check_over_prune(len(self.model)):
                         log.warning("[Trainer] Triggering emergency re-seed.")
@@ -407,10 +420,12 @@ class GaussianTrainer:
             # ── tqdm postfix ─────────────────────────────────────────
             vram = self._vram_gb() if it % 100 == 0 else getattr(self, "_last_vram", 0.0)
             self._last_vram = vram
+            iter_ms = (_time.time() - t_iter_start) * 1000.0
             pbar.set_postfix({
                 "loss": f"{loss_val:.4f}",
                 "N":    f"{len(self.model):,}",
                 "VRAM": f"{vram:.2f}G",
+                "iter": f"{iter_ms:.0f}ms",
                 "NaN":  nan_count,
             })
 
@@ -567,25 +582,40 @@ class GaussianTrainer:
         self,
         grad_threshold: float = 0.0002,
         percent_dense: float = 0.01,
-    ) -> None:
+    ) -> dict:
+        """Densify/prune and return telemetry counters."""
         avg_grads = (self._grad_accum / (self._grad_denom + 1e-8)).clone()
+
+        n_before = len(self.model)
         scene_extent = self.model.positions.detach().norm(dim=1).max().item()
+
         scene_extent = max(scene_extent, 0.1)  # guard against degenerate scenes
 
         self.optimizer.zero_grad(set_to_none=True)
-        self.model.densify_and_clone(avg_grads, grad_threshold, scene_extent, percent_dense)
+
+        n_clone = self.model.densify_and_clone(
+            avg_grads, grad_threshold, scene_extent, percent_dense
+        )
 
         n_current = len(self.model)
         n_old = avg_grads.shape[0]
+
         if n_current > n_old:
             padding = torch.zeros(n_current - n_old, device=self.device)
             avg_grads_split = torch.cat([avg_grads, padding], dim=0)
         else:
             avg_grads_split = avg_grads[:n_current]
 
-        self.model.densify_and_split(avg_grads_split, grad_threshold, scene_extent, percent_dense, N=2)
+        n_split = self.model.densify_and_split(
+            avg_grads_split,
+            grad_threshold,
+            scene_extent,
+            percent_dense,
+            N=2,
+        )
 
         # Prune: low-opacity OR oversized
+
         prune_mask = (
             (self.model.opacities.squeeze() < 0.005) |
             (self.model.scales.max(dim=1).values > 0.1 * scene_extent)
@@ -599,10 +629,12 @@ class GaussianTrainer:
             budget_mask[low_idx] = True
             prune_mask = prune_mask | budget_mask
 
+        n_prune = 0
         if prune_mask.any():
-            self.model.prune_points(prune_mask)
+            n_prune = self.model.prune_points(prune_mask)
 
         n = len(self.model)
+
         self._grad_accum  = torch.zeros(n, device=self.device)
         self._grad_denom  = torch.zeros(n, device=self.device)
         self._radii_accum = torch.zeros(n, device=self.device)
@@ -610,6 +642,14 @@ class GaussianTrainer:
 
         if self.device == "cuda":
             torch.cuda.empty_cache()
+
+        return {
+            "n_before": n_before,
+            "n_after": len(self.model),
+            "n_clone": int(n_clone),
+            "n_split_children": int(n_split),
+            "n_prune": int(n_prune),
+        }
 
     def _emergency_reseed(self) -> None:
         """If Gaussians are nearly gone, check for a last checkpoint and reload."""

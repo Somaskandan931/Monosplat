@@ -613,18 +613,13 @@ def extract_from_video(
     output_pattern = str(output_dir / "output_%04d.jpg")
 
     # ------------------ VIDEO FILTER ------------------
-    # Scale so the longer side is at least 1280px; -2 rounds to even for codec
-    # compat.  The if(gt(iw,ih),...) guard handles portrait video correctly —
-    # the old `scale='max(iw,1280)':-2` form treated the height arg as a literal
-    # string on some FFmpeg builds, producing 12px-wide frames.
-    # Portrait-safe scale: longer side → ≥1280px, shorter side auto (-2=even).
-    # gte(iw,ih) handles square correctly; gt would misclassify squares as portrait.
-    _scale = "scale='if(gte(iw,ih),max(iw,1280),-2)':'if(gte(iw,ih),-2,max(ih,1280))'"
+    # IMPORTANT: Do NOT resize before COLMAP.
+    # Keep original frame resolution (1280×830 in the required pipeline).
     if adaptive_sampling:
-        vf_filter = f"select='gt(scene,0.02)',fps={fps},{_scale}"
-        print("[extract] Using adaptive sampling")
+        vf_filter = f"select='gt(scene,0.02)',fps={fps}"
+        print("[extract] Using adaptive sampling (no resize)")
     else:
-        vf_filter = f"fps={fps},{_scale}"
+        vf_filter = f"fps={fps}"
 
     # ------------------ FFmpeg ------------------
     cmd = [
@@ -683,7 +678,7 @@ def extract_from_video(
         cmd_retry = [
             ffmpeg,
             "-i", str(video_path),
-            "-vf", f"fps={fps_retry},{_scale}",
+            "-vf", f"fps={fps_retry}" ,
             "-vsync", "vfr",
             "-pix_fmt", "yuv420p",
             "-frames:v", str(max_frames),

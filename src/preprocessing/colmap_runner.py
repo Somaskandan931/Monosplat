@@ -197,7 +197,7 @@ def run_colmap(
         # COLMAP aggressively resizing images before feature extraction.
         # Setting 4096 ensures 1280×830 (or higher) frames are untouched.
         "--SiftExtraction.max_image_size",       "4096",
-        "--SiftExtraction.max_num_features",     "8192",
+        "--SiftExtraction.max_num_features",     "16000",
         "--SiftExtraction.peak_threshold",       "0.004",
         "--SiftExtraction.edge_threshold",       "10",
         "--SiftExtraction.first_octave",         "-1",
