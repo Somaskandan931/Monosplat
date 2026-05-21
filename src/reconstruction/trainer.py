@@ -191,7 +191,7 @@ class GaussianTrainer:
 
         # Mixed precision scaler (fp16 on CUDA, no-op on CPU)
         self._use_amp = (self.device == "cuda")
-        self._scaler = torch.cuda.amp.GradScaler(enabled=self._use_amp)
+        self._scaler = torch.amp.GradScaler('cuda', enabled=self._use_amp)
 
         if self.device == "cpu":
             max_cpu = getattr(cfg.training, "iterations_cpu", 1000)
