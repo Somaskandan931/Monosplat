@@ -1,0 +1,24 @@
+# backend/requirements-backend.txt  (Phase 10)
+# ---------------------------------------------------
+# Install with: pip install -r backend/requirements-backend.txt
+
+# ── Web framework ────────────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9
+aiofiles>=23.2.1
+
+# ── Data validation ───────────────────────────────────────────────────────────
+pydantic>=2.7.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+sqlalchemy>=2.0.30
+alembic>=1.13.1
+
+# PostgreSQL driver (production) — choose one:
+psycopg2-binary>=2.9.9         # binary wheel, easiest install
+# psycopg[binary]>=3.1.18      # psycopg3 (faster, async-capable)
+# asyncpg>=0.29.0              # async driver (use with create_async_engine)
+
+# ── Existing MonoSplat deps (must already be installed) ──────────────────────
+# torch torchvision gsplat plyfile numpy Pillow tqdm pyyaml opencv-python lpips

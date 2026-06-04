@@ -1,0 +1,28 @@
+# MonoSplat requirements
+# Install with: pip install -r requirements.txt
+
+# Core
+torch
+torchvision
+numpy
+Pillow
+tqdm
+pyyaml
+
+# 3D Gaussian Splatting rasterizer
+gsplat
+
+# Point cloud I/O
+plyfile
+
+# Image quality metrics (optional but recommended)
+lpips
+
+# Dataset / preprocessing
+opencv-python
+
+# Web UI (optional)
+streamlit
+
+# Pydantic config (optional, falls back to dataclass)
+pydantic

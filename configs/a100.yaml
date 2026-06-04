@@ -1,0 +1,19 @@
+training:
+  iterations: 30000
+  densify_until_iter: 15000
+  densification_interval: 200
+  densify_grad_threshold: 0.0003
+  max_gaussians: 250000
+  position_lr_max_steps: 30000
+  save_iterations: [1000, 5000, 10000, 20000, 30000]
+  checkpoint_iterations: [1000, 5000, 10000, 20000, 30000]
+  test_iterations: [5000, 10000, 20000, 30000]
+
+renderer:
+  max_gaussians: 250000
+
+data:
+  max_frames: 500
+
+runtime:
+  profile_name: a100

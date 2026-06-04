@@ -1,0 +1,14 @@
+# Minimal dependencies for Colab GPU training.
+# torch/torchvision are pre-installed on Colab — do NOT re-pin them here.
+
+numpy>=1.24.0,<2.0.0
+Pillow>=9.5.0
+PyYAML>=6.0
+tqdm>=4.65.0
+scipy>=1.10.0
+plyfile>=0.8.1
+lpips>=0.1.4
+
+# gsplat requires CUDA compilation — install separately in the notebook
+# with the correct CUDA version flag, NOT via requirements.txt:
+#   !pip install gsplat --extra-index-url https://docs.gsplat.studio/whl/pt24cu121

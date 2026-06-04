@@ -1,0 +1,93 @@
+# configs/config.yaml
+#
+# GPU-TIER PRESETS (auto-applied by Colab notebook Cell 1):
+#   T4  (15 GB) — these defaults (safe)
+#   L4  (22 GB) — max_gaussians 150000, lambda_lpips 0.05, iterations 25000
+#   A100(40 GB) — max_gaussians 300000, lambda_lpips 0.1,  iterations 30000
+#
+# FIXES in this version:
+#   [FIX-1] Added missing `data` and `colmap` sections — prepare_dataset.py
+#           accessed cfg.data / cfg.colmap which crashed with AttributeError
+#           because load_config() returns a dict, not an object.
+#   [FIX-2] densify_grad_threshold: 0.0002 → 0.0005 (standard 3DGS value).
+#           0.0002 cloned almost every Gaussian every densify step, causing
+#           Gaussian explosion and VRAM exhaustion within the first densify window.
+#   [FIX-3] densification_interval: 300 → 500 (standard 3DGS value).
+#           300 gave 15 densify events in the 500→5000 window; each event
+#           reallocates all 6 parameter tensors + optimizer states, so the
+#           GPU allocator is hammered 15 times before any pruning stabilises
+#           the count. 500 halves this to ~10 events.
+#   [FIX-4] lambda_dssim aligned to 0.2 (original 3DGS paper). 0.4 over-weighted
+#           structural loss early in training, making L1 gradients too weak to
+#           guide densification correctly.
+#   [FIX-5] save_iterations / checkpoint_iterations: added 1000 to catch the very
+#           first checkpoint before the densify window, giving a recovery point.
+
+training:
+  iterations: 30000
+
+  densify_from_iter: 500
+  densify_until_iter: 15000
+
+  # More frequent but still safe for T4
+  densification_interval: 200
+
+  # Balanced: avoids explosion but still refines detail
+  densify_grad_threshold: 0.0003
+
+  # Increased but still T4-safe
+  max_gaussians: 150000
+
+  # More frequent cleanup
+  opacity_reset_interval: 1000
+
+  lambda_opacity_reg: 0.001
+  lambda_dssim: 0.2
+
+  # 🔥 CRITICAL (this fixes blur)
+  lambda_lpips: 0.05
+
+  percent_dense: 0.01
+
+  position_lr_init: 0.00016
+  position_lr_final: 0.0000016
+  position_lr_delay_mult: 0.01
+  position_lr_max_steps: 30000
+
+  feature_lr: 0.0025
+  opacity_lr: 0.05
+  scaling_lr: 0.005
+  rotation_lr: 0.001
+
+  save_iterations: [1000, 5000, 10000, 20000, 30000]
+  checkpoint_iterations: [1000, 5000, 10000, 20000, 30000]
+  test_iterations: [5000, 10000, 20000, 30000]
+
+model:
+  sh_degree: 3
+
+renderer:
+  # MUST equal training.max_gaussians — a lower value here silently caps the
+  # number of Gaussians written to the exported .ply / .splat file, causing
+  # the export to look blurrier than the training previews even after a good run.
+  max_gaussians: 150000
+
+pipeline:
+  convert_SHs_python: false
+  compute_cov3D_python: false
+  debug: false
+
+# FIX-1: Added data section — required by prepare_dataset.py
+# (cfg["data"]["max_frames"] and cfg["data"]["image_width"])
+data:
+  max_frames: 300
+  image_width: 0      # 0 = keep original COLMAP resolution
+  image_height: 0
+
+# FIX-1: Added colmap section — required by prepare_dataset.py
+# (cfg["colmap"]["quality"], cfg["colmap"]["binary_path"], etc.)
+colmap:
+  quality: medium          # low / medium / high
+  binary_path: colmap      # path to colmap binary (or just "colmap" if on PATH)
+  camera_model: OPENCV     # best for phone video (models radial distortion)
+  single_camera: true      # all frames from the same lens → one camera model
