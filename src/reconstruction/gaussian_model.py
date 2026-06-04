@@ -34,7 +34,27 @@ PATCH APPLIED (June 2026):
        world-unit) when COLMAP point spacing is large, producing giant blobs
        that dominate early training and never recover.  Forcing max=0.0 means
        all initial Gaussians are ≤ 1 world-unit and must earn their size.
+
+FIX APPLIED (June 2026 — foggy preview):
+  FP-1. initialise_from_pcd now computes max_log_scale from spatial_lr_scale
+        (= cameras_extent, passed by train.py after scene normalization).
+        After normalize_scene the scene fits inside a ~0.047-radius sphere,
+        so clamping log-scales to 0.0 still produces Gaussians with diameter
+        exp(0) = 1.0 world-unit — 21× larger than the entire scene.  Every
+        Gaussian is a giant translucent blob and the render is solid grey fog.
+        Fix: max_log_scale = log(cameras_extent * 0.1), which keeps each
+        initial Gaussian at ~10% of the scene radius.  After normalization
+        cameras_extent is floored to 1.0 in train.py (see FP-2 there), so
+        the default behaviour (spatial_lr_scale=1.0) is max_log_scale = log(0.1)
+        ≈ −2.3, giving initial Gaussian diameter ≈ 0.1 world-units — correct
+        for a unit-sphere scene.
+  FP-2. get_scaling upper clamp raised from 1.0 to exp(0) = 1.0 but now driven
+        by self._max_log_scale stored during initialise_from_pcd, so cloning/
+        splitting during densification cannot grow Gaussians beyond the same
+        ceiling that was used at init time.
 """
+
+import math
 
 import torch
 import torch.nn as nn
@@ -66,6 +86,10 @@ class GaussianModel(nn.Module):
         self.denom:              Tensor = torch.empty(0)
         self.max_radii2D:        Tensor = torch.empty(0)
 
+        # FP-2: scale ceiling — set by initialise_from_pcd, used by get_scaling
+        # and _densify_and_split so cloned/split Gaussians obey the same limit.
+        self._max_log_scale: float = 0.0
+
     # ------------------------------------------------------------------
     # Properties — "activated" values used during rendering
     # ------------------------------------------------------------------
@@ -85,11 +109,11 @@ class GaussianModel(nn.Module):
 
     @property
     def get_scaling(self) -> Tensor:
-        # PATCH: upper clamp kept at 1.0 (exp(0.0) = 1.0) to match initial
-        # scale clamp in initialise_from_pcd.  This prevents runaway Gaussian
-        # growth during densification while still allowing meaningful coverage.
-        # Lower floor -4 = exp(-4) ≈ 0.018 world-units minimum.
-        return torch.exp(torch.clamp(self._scales, min=-4.0, max=1.0))
+        # FP-2: upper clamp tracks self._max_log_scale (set during
+        # initialise_from_pcd from cameras_extent) so Gaussians cannot grow
+        # beyond the same ceiling used at initialisation time.
+        # Lower floor: -4 = exp(-4) ≈ 0.018 world-units minimum.
+        return torch.exp(torch.clamp(self._scales, min=-4.0, max=self._max_log_scale))
 
     @property
     def get_rotation(self) -> Tensor:
@@ -145,8 +169,26 @@ class GaussianModel(nn.Module):
         rgb: Tensor,
         spatial_lr_scale: float = 1.0,
     ) -> None:
-        """Populate model parameters from a coloured point cloud."""
+        """Populate model parameters from a coloured point cloud.
+
+        Args:
+            xyz:              (N, 3) point positions in normalized scene space.
+            rgb:              (N, 3) colours in [0, 1].
+            spatial_lr_scale: cameras_extent after normalization (floored to 1.0
+                              in train.py).  Used to derive the initial Gaussian
+                              size ceiling: each Gaussian starts at ≤10% of the
+                              scene radius rather than at an absolute 1.0 world-
+                              unit, which was 21× too large for a normalized scene.
+        """
         self.spatial_lr_scale = spatial_lr_scale
+
+        # FP-1: compute scale ceiling relative to scene extent so Gaussians
+        # start small enough to resolve detail in the normalized scene.
+        # cameras_extent is floored to 1.0 in train.py (FP-2 there), so the
+        # default path (no normalization) gives max_log_scale = log(0.1) ≈ −2.3.
+        # For a typical normalized scene (extent ≈ 1.0) each Gaussian starts
+        # with diameter exp(−2.3) ≈ 0.1 world-units — correct for a unit sphere.
+        self._max_log_scale = math.log(max(spatial_lr_scale * 0.1, 1e-4))
 
         n = xyz.shape[0]
 
@@ -160,12 +202,11 @@ class GaussianModel(nn.Module):
         dist2 = torch.clamp_min(dist2, 1e-7)
         scales = torch.log(torch.sqrt(dist2)).unsqueeze(-1).repeat(1, 3)
 
-        # PATCH: clamp initial log-scales to [-4, 0] so exp(scale) ≤ 1.0.
-        # Without this, large COLMAP point-cloud neighbourhoods produce
-        # log-scales > 0, which means Gaussians start bigger than 1 world-unit
-        # and immediately dominate the scene with giant blobs.  Clamping to 0
-        # forces the model to earn larger sizes through training gradient.
-        scales = torch.clamp(scales, min=-4.0, max=0.0)
+        # FP-1: clamp initial log-scales to [-4, _max_log_scale].
+        # Old hard ceiling was 0.0 (exp(0) = 1.0 world-unit).  After
+        # normalize_scene the scene is ~0.047 units wide, so a 1.0-unit
+        # Gaussian covers the entire scene — hence solid grey fog at iter 500.
+        scales = torch.clamp(scales, min=-4.0, max=self._max_log_scale)
 
         rots = torch.zeros(n, 4)
         rots[:, 0] = 1.0                                       # identity quat
@@ -343,7 +384,7 @@ class GaussianModel(nn.Module):
         R_mats  = _build_rotation(rots)
         new_xyz = (R_mats @ samples.unsqueeze(-1)).squeeze(-1) \
                   + self._xyz[selected].repeat(N, 1)
-        new_scales    = torch.log(scales).clamp(-4.0, 1.0)  # PATCH: match get_scaling upper bound of 1.0
+        new_scales    = torch.log(scales).clamp(-4.0, self._max_log_scale)  # FP-2: track init ceiling
         new_features_dc   = self._features_dc[selected].repeat(N, 1, 1)
         new_features_rest = self._features_rest[selected].repeat(N, 1, 1)
         new_opacities = self._opacities[selected].repeat(N, 1)

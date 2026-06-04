@@ -1,93 +1,99 @@
-# configs/config.yaml
+# configs/config.yaml — SINGLE SOURCE OF TRUTH
 #
-# GPU-TIER PRESETS (auto-applied by Colab notebook Cell 1):
-#   T4  (15 GB) — these defaults (safe)
-#   L4  (22 GB) — max_gaussians 150000, lambda_lpips 0.05, iterations 25000
-#   A100(40 GB) — max_gaussians 300000, lambda_lpips 0.1,  iterations 30000
+# ── HOW GPU TIERS WORK ────────────────────────────────────────────────────────
+# The Colab notebook applies tier-specific overrides at runtime via the
+# MONOSPLAT_EXTRA_TRAIN_ARGS environment variable, which train.py reads through
+# _apply_env_overrides().  You do NOT need separate t4.yaml / l4.yaml / a100.yaml
+# files — those have been deleted.  Edit the HARDWARE_TIERS dict in the notebook
+# Cell 2 to change per-tier values.  The values below are the T4 (15 GB) baseline.
 #
-# FIXES in this version:
-#   [FIX-1] Added missing `data` and `colmap` sections — prepare_dataset.py
-#           accessed cfg.data / cfg.colmap which crashed with AttributeError
-#           because load_config() returns a dict, not an object.
+# ── TIER REFERENCE ────────────────────────────────────────────────────────────
+#  GPU    VRAM   iterations  max_gaussians  densify_grad_threshold  lambda_lpips
+#  T4     15 GB  12000       80000          0.0005                  0.05  ← these defaults
+#  L4     22 GB  18000       120000         0.0004                  0.05
+#  A100   40 GB  30000       250000         0.0003                  0.1
+#
+# ── CHANGELOG ─────────────────────────────────────────────────────────────────
+#   [FIX-1] Added `data` and `colmap` sections — prevent AttributeError in
+#           prepare_dataset.py (load_config returns dict, not object).
 #   [FIX-2] densify_grad_threshold: 0.0002 → 0.0005 (standard 3DGS value).
-#           0.0002 cloned almost every Gaussian every densify step, causing
-#           Gaussian explosion and VRAM exhaustion within the first densify window.
-#   [FIX-3] densification_interval: 300 → 500 (standard 3DGS value).
-#           300 gave 15 densify events in the 500→5000 window; each event
-#           reallocates all 6 parameter tensors + optimizer states, so the
-#           GPU allocator is hammered 15 times before any pruning stabilises
-#           the count. 500 halves this to ~10 events.
-#   [FIX-4] lambda_dssim aligned to 0.2 (original 3DGS paper). 0.4 over-weighted
-#           structural loss early in training, making L1 gradients too weak to
-#           guide densification correctly.
-#   [FIX-5] save_iterations / checkpoint_iterations: added 1000 to catch the very
-#           first checkpoint before the densify window, giving a recovery point.
+#           0.0002 cloned almost every Gaussian each step → VRAM exhaustion.
+#   [FIX-3] densification_interval: 300 → 500.  Halves optimizer reallocation
+#           events in the 500→8000 window from ~15 to ~8.
+#   [FIX-4] lambda_dssim: 0.4 → 0.2 (original 3DGS paper value).
+#           0.4 over-weighted structural loss early, weakening L1 guidance.
+#   [FIX-5] checkpoint_iterations: added 1000 for an early recovery point.
+#   [FP-1]  Foggy preview fix — initial Gaussian scale ceiling now derived from
+#           cameras_extent (passed as spatial_lr_scale in train.py) so Gaussians
+#           start at ~10% of scene radius rather than a fixed 1.0 world-unit.
+#           After normalize_scene the scene is ~0.047 units wide; the old 1.0-
+#           unit ceiling made every Gaussian a giant translucent blob → grey fog.
+#   [FP-2]  cameras_extent floored to 1.0 in train.py after normalization so
+#           densify_and_prune() screen-size thresholds are computed correctly.
 
 training:
-  iterations: 30000
+  iterations: 12000           # T4 baseline — notebook overrides for L4/A100
 
   densify_from_iter: 500
-  densify_until_iter: 15000
+  densify_until_iter: 8000    # T4 baseline
 
-  # More frequent but still safe for T4
-  densification_interval: 200
+  densification_interval: 500 # [FIX-3] was 300 → too many reallocations
+  densify_grad_threshold: 0.0005  # [FIX-2] standard 3DGS value
 
-  # Balanced: avoids explosion but still refines detail
-  densify_grad_threshold: 0.0003
+  max_gaussians: 80000        # T4 baseline — hard cap enforced in trainer.py
 
-  # Increased but still T4-safe
-  max_gaussians: 150000
-
-  # More frequent cleanup
   opacity_reset_interval: 1000
 
   lambda_opacity_reg: 0.001
-  lambda_dssim: 0.2
-
-  # 🔥 CRITICAL (this fixes blur)
-  lambda_lpips: 0.05
+  lambda_dssim: 0.2           # [FIX-4] was 0.4 → over-weighted structural loss
+  lambda_lpips: 0.05          # LPIPS perceptual loss — critical for sharpness
 
   percent_dense: 0.01
 
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
   position_lr_delay_mult: 0.01
-  position_lr_max_steps: 30000
+  position_lr_max_steps: 12000  # must match iterations for T4
 
   feature_lr: 0.0025
   opacity_lr: 0.05
   scaling_lr: 0.005
   rotation_lr: 0.001
 
-  save_iterations: [1000, 5000, 10000, 20000, 30000]
-  checkpoint_iterations: [1000, 5000, 10000, 20000, 30000]
-  test_iterations: [5000, 10000, 20000, 30000]
+  save_iterations: [1000, 5000, 8000, 12000]
+  checkpoint_iterations: [1000, 5000, 8000, 12000]  # [FIX-5] added 1000
+  test_iterations: [5000, 12000]
 
 model:
   sh_degree: 3
 
 renderer:
   # MUST equal training.max_gaussians — a lower value here silently caps the
-  # number of Gaussians written to the exported .ply / .splat file, causing
-  # the export to look blurrier than the training previews even after a good run.
-  max_gaussians: 150000
+  # Gaussian count written to the exported .ply / .splat, making the export
+  # look blurrier than training previews even after a successful run.
+  max_gaussians: 80000        # keep in sync with training.max_gaussians
 
 pipeline:
   convert_SHs_python: false
   compute_cov3D_python: false
   debug: false
 
-# FIX-1: Added data section — required by prepare_dataset.py
-# (cfg["data"]["max_frames"] and cfg["data"]["image_width"])
+# [FIX-1] data section — accessed by prepare_dataset.py
 data:
-  max_frames: 300
-  image_width: 0      # 0 = keep original COLMAP resolution
+  max_frames: 180             # T4 baseline (≈ 6 s video at 30 fps stride 1)
+  image_width: 0              # 0 = keep original COLMAP resolution
   image_height: 0
 
-# FIX-1: Added colmap section — required by prepare_dataset.py
-# (cfg["colmap"]["quality"], cfg["colmap"]["binary_path"], etc.)
+# [FIX-1] colmap section — accessed by prepare_dataset.py
 colmap:
-  quality: medium          # low / medium / high
-  binary_path: colmap      # path to colmap binary (or just "colmap" if on PATH)
-  camera_model: OPENCV     # best for phone video (models radial distortion)
-  single_camera: true      # all frames from the same lens → one camera model
+  quality: medium             # low / medium / high
+  binary_path: colmap         # path to colmap binary (or "colmap" if on PATH)
+  camera_model: OPENCV        # best for phone video — models radial distortion
+  single_camera: true         # all frames share one lens → single camera model
+
+runtime:
+  auto_profile: true          # notebook applies HARDWARE_TIERS overrides
+  auto_resume: true
+  cache_cleanup_interval: 500
+  drive_persistence: true
+  drive_root: /content/drive/MyDrive/MonoSplat

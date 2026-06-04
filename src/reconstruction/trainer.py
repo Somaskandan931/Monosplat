@@ -491,7 +491,15 @@ class Trainer:
             self.model._prune_points(prune_mask, self.optimizer)
             return
 
-        extent = self.scene.cameras_extent
+        # FIX: cameras_extent after scene normalization is often ~0.1 instead of ~1.0
+        # because normalize_scene scales the *point cloud* to a unit sphere but the
+        # camera centres remain clustered tightly.  Passing a tiny extent to
+        # densify_and_prune sets the size-pruning threshold to
+        #   percent_dense * extent = 0.01 * 0.1 = 0.001 world units,
+        # which prunes virtually every Gaussian in the early densification window
+        # and prevents the scene from ever building up detail (grey/foggy output).
+        # Clamping to max(extent, 1.0) restores standard 3DGS behaviour.
+        extent = max(self.scene.cameras_extent, 1.0)
         self.model.densify_and_prune(
             max_grad=self.densify_grad_threshold,
             min_opacity=0.005,

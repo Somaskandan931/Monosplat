@@ -296,7 +296,18 @@ def main() -> None:
 
     # ── Scene extent ──────────────────────────────────────────────────────────
     cameras_extent = compute_cameras_extent(dataset)
-    log.info("cameras_extent = %.4f  (should be ~1.0 after normalization)", cameras_extent)
+    # FP-2 (foggy preview fix): after normalize_scene the scene fits inside a
+    # ~0.047-radius sphere.  compute_cameras_extent() then returns ~0.1 because
+    # all camera centres are clustered near the origin.  Passing 0.1 to
+    # densify_and_prune() makes the screen-size pruning threshold 10× too tight,
+    # killing most Gaussians.  After normalization the scene IS unit-scale by
+    # construction, so cameras_extent < 1.0 is always an underestimate — clamp.
+    cameras_extent_raw = cameras_extent
+    cameras_extent = max(cameras_extent, 1.0)
+    log.info(
+        "cameras_extent = %.4f (raw) → %.4f (floored to 1.0 after normalization)",
+        cameras_extent_raw, cameras_extent,
+    )
     dataset.cameras_extent = cameras_extent
 
     # ── Point cloud → Gaussian init ───────────────────────────────────────────
@@ -309,7 +320,12 @@ def main() -> None:
     log.info("Initialising %d Gaussians from sparse point cloud.", len(xyz))
 
     model = GaussianModel(sh_degree=cfg["model"]["sh_degree"])
-    model.initialise_from_pcd(xyz, rgb, spatial_lr_scale=1.0)
+    # FP-1 (foggy preview fix): pass cameras_extent as spatial_lr_scale so
+    # initialise_from_pcd computes the initial Gaussian size ceiling relative
+    # to the actual scene radius rather than an absolute 1.0 world-unit.
+    # With cameras_extent=1.0 (post-normalization floor), each Gaussian starts
+    # at diameter ≈ 0.1 world-units — correct for a unit-sphere scene.
+    model.initialise_from_pcd(xyz, rgb, spatial_lr_scale=cameras_extent)
 
     # ── Trainer ───────────────────────────────────────────────────────────────
     trainer = Trainer(cfg=cfg, model=model, scene=dataset)
