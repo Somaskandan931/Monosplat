@@ -66,16 +66,21 @@
 #   [T&T-10] renderer.max_gaussians synced to training.max_gaussians=200000.
 #   [T&T-11] colmap.camera_model default changed to SIMPLE_RADIAL for T&T
 #            dataset downloads.  Set to OPENCV for phone video input.
+#   [COLLAPSE-FIX-1] densify_from_iter: 500 → 1000. Extra warmup before densification.
+#   [COLLAPSE-FIX-2] densify_grad_threshold: 0.0005 → 0.0002. More clone/split events;
+#            stage-based pruning in trainer.py keeps early pruning conservative.
+#   [COLLAPSE-FIX-3] gaussian_model._prune_points min_keep: 1000 → 10000. Hard floor.
+#   [COLLAPSE-FIX-4] trainer._maybe_densify: 3-stage logic + opacity debug + safety guard.
 
 training:
   iterations: 20000           # [T&T-3] T4 baseline — notebook overrides for L4/A100
 
-  densify_from_iter: 500
+  densify_from_iter: 1000       # [COLLAPSE-FIX] was 500 — extra 500-iter stabilization window
   densify_until_iter: 16000   # [T&T-2] was 8000 — must run deep for large scenes
 
   densification_interval: 200 # [T&T-5] was 500 — more frequent fill for sparse coverage
-  densify_grad_threshold: 0.0005  # [75-VIEW-FIX] was 0.0003 — less aggressive; 75 views
-                                  # produce sparse gradients per region, 0.0003 barely fires clone/split
+  densify_grad_threshold: 0.0002  # [COLLAPSE-FIX] was 0.0005 — lower threshold fires more
+                                  # clone/split events; stage logic in trainer controls pruning
 
   max_gaussians: 200000       # [T&T-1] was 80000 — T4 T&T baseline
 

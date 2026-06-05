@@ -485,8 +485,6 @@ class Trainer:
                 f"Gaussian limit reached ({self.max_gaussians:,}). "
                 f"Pruning lowest-opacity 20% at iter {iteration}."
             )
-            # PATCH: prune 20% lowest-opacity instead of hard skip,
-            # so densification can continue adding where it matters.
             with torch.no_grad():
                 opacities = self.model.get_opacity.squeeze(-1)
                 k_prune   = max(1, int(0.2 * n_current))
@@ -496,38 +494,82 @@ class Trainer:
             self.model._prune_points(prune_mask, self.optimizer)
             return
 
-        # FIX: cameras_extent after scene normalization is often ~0.1 instead of ~1.0
-        # because normalize_scene scales the *point cloud* to a unit sphere but the
-        # camera centres remain clustered tightly.  Passing a tiny extent to
-        # densify_and_prune sets the size-pruning threshold to
-        #   percent_dense * extent = 0.01 * 0.1 = 0.001 world units,
-        # which prunes virtually every Gaussian in the early densification window
-        # and prevents the scene from ever building up detail (grey/foggy output).
-        # Clamping to max(extent, 1.0) restores standard 3DGS behaviour.
+        # ── Opacity debug visibility ──────────────────────────────────────────
+        # Shows distribution before each densify step — useful for diagnosing
+        # collapse (mean near 0) or saturation (mean near 1).
+        with torch.no_grad():
+            opacity = self.model.get_opacity
+            log.info(
+                "[DEBUG] opacity min=%.6f  mean=%.6f  max=%.6f",
+                opacity.min().item(),
+                opacity.mean().item(),
+                opacity.max().item(),
+            )
+
+        # ── cameras_extent clamp ──────────────────────────────────────────────
+        # After normalize_scene cameras_extent can be ~0.1, making the
+        # size-pruning threshold 10× too tight.  Floor to 1.0 restores
+        # standard 3DGS screen-space pruning behaviour.
         extent = max(self.scene.cameras_extent, 1.0)
 
-        # Enable screen-size pruning only after a warmup window so large
-        # screen-space floaters get removed once coverage has built up.
-        max_screen = 0
-        if iteration > (self.densify_from_iter + 1000):
-            max_screen = 20
+        # ── Stage-based training logic ────────────────────────────────────────
+        #
+        # Stage 1 (iter < 2000): Stabilization — no pruning, low grad threshold.
+        #   Scene is still learning structure; aggressive pruning here causes
+        #   Gaussian collapse before the model has enough signal to recover.
+        #
+        # Stage 2 (2000 ≤ iter < 6000): Controlled pruning — gentle opacity
+        #   floor.  Coverage is established; light cleanup is safe.
+        #
+        # Stage 3 (iter ≥ 6000): Normal pruning — standard 3DGS thresholds.
+        #   Model is mature; prune aggressively to remove floaters.
+        if iteration < 2000:
+            min_opacity = 0.0       # no opacity pruning in stabilization stage
+            grad_thresh = 0.0002    # low threshold → more clone/split events
+            max_screen  = 0         # no screen-size pruning yet
+        elif iteration < 6000:
+            min_opacity = 0.0001    # very gentle floor
+            grad_thresh = 0.0002
+            max_screen  = 0
+        else:
+            min_opacity = 0.0005    # standard-ish floor
+            grad_thresh = 0.0003
+            max_screen  = 20 if iteration > (self.densify_from_iter + 1000) else 0
 
         before = self.model.get_xyz.shape[0]
 
         self.model.densify_and_prune(
-            max_grad=self.densify_grad_threshold,
-            min_opacity=0.002,  # [75-VIEW-FIX] was 0.005 — 75 views don't accumulate enough
-                                # gradient signal in early iters to keep Gaussians above 0.005,
-                                # causing near-total opacity collapse before densification starts.
+            max_grad=grad_thresh,
+            min_opacity=min_opacity,
             extent=extent,
             max_screen_size=max_screen,
             optimizer=self.optimizer,
         )
 
         after = self.model.get_xyz.shape[0]
+
+        # ── Critical safety guard ─────────────────────────────────────────────
+        # If pruning wiped out too many Gaussians, log the collapse and skip
+        # (the prune already happened, but future steps will re-densify).
+        # The floor is raised to 10000 in _prune_points in gaussian_model.py
+        # so in practice this block fires only if that guard was bypassed.
+        MIN_GAUSSIANS = 10000
+        if after < MIN_GAUSSIANS:
+            log.critical(
+                "[CRITICAL] Gaussian collapse detected at iter %d: %d Gaussians remaining. "
+                "Densification disabled for this step. Check opacity distribution above.",
+                iteration, after,
+            )
+            # Nothing more to do — the guard in _prune_points should have
+            # prevented this, but log it prominently so it's visible.
+            return
+
         log.info(
-            "[DENSIFY] iter=%d  before=%d  after=%d  delta=%+d  extent=%.4f",
-            iteration, before, after, after - before, extent,
+            "[DENSIFY] iter=%d  before=%d  after=%d  delta=%+d  "
+            "stage=%s  min_opacity=%.4f  grad_thresh=%.4f  extent=%.4f",
+            iteration, before, after, after - before,
+            "stabilize" if iteration < 2000 else ("controlled" if iteration < 6000 else "normal"),
+            min_opacity, grad_thresh, extent,
         )
 
 

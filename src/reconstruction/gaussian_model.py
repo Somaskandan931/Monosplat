@@ -433,7 +433,7 @@ class GaussianModel(nn.Module):
             mask = fixed
 
         keep = ~mask
-        min_keep = min(1000, self._xyz.shape[0])
+        min_keep = min(10000, self._xyz.shape[0])  # [COLLAPSE-FIX] was 1000 — floor raised to 10k
 
         if int(keep.sum().item()) < min_keep:
             opacity = self.get_opacity.detach().squeeze(-1)
