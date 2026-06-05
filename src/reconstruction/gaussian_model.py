@@ -427,7 +427,11 @@ class GaussianModel(nn.Module):
             mask = fixed
 
         keep = ~mask
-        min_keep = min(1000, self._xyz.shape[0])
+        # min_keep: safety floor so we never prune to zero.
+        # 1000 was too high — it masked the iter=2000 mass-prune symptom and left
+        # a ghost 1k-Gaussian population that could never densify (delta=+0 forever).
+        # 100 is enough to survive any single bad prune step without hiding bugs.
+        min_keep = min(100, self._xyz.shape[0])
 
         if int(keep.sum().item()) < min_keep:
             opacity = self.get_opacity.detach().squeeze(-1)

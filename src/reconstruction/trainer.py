@@ -538,9 +538,25 @@ class Trainer:
 
         # Enable screen-size pruning only after a warmup window so large
         # screen-space floaters get removed once coverage has built up.
+        # Screen-size pruning: only activate after enough coverage has built up,
+        # AND use a conservative threshold (100 px, not 20 px).
+        #
+        # Root cause of the iter=2000 mass-prune observed in training logs:
+        #   - max_screen=20 activated at first densify step past iter 1500
+        #     (densify_from_iter=500 + 1000 = 1500 boundary)
+        #   - max_radii2D had accumulated large values from 500 close-up renders
+        #     with NO prior screen-size pruning to constrain them
+        #   - result: big_vs flagged ~19,500 of 20,497 Gaussians → only 1,000
+        #     survived (_prune_points min_keep floor), loss jumped to 0.65+,
+        #     delta=+0 at every subsequent densify step → total training collapse
+        #
+        # Fix:
+        #   1. Raise threshold 20 → 100 px (standard 3DGS value for this resolution)
+        #   2. Defer first activation to densify_from_iter + 3000 so the scene has
+        #      solid Gaussian coverage before any screen-size pruning ever fires.
         max_screen = 0
-        if iteration > (self.densify_from_iter + 1000):
-            max_screen = 20
+        if iteration > (self.densify_from_iter + 3000):
+            max_screen = 100
 
         before = self.model.get_xyz.shape[0]
 
