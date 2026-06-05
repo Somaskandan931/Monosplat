@@ -87,7 +87,11 @@ def from_checkpoint(ckpt_path: str, output_dir: str) -> None:
     # during training edge cases (NaN recovery, AMP rounding, etc.).
     import numpy as np
     gaussians["opacities"] = np.clip(gaussians["opacities"], 0.0, 1.0)
-    gaussians["scales"]    = np.clip(gaussians["scales"],    1e-4, 0.1)
+    # NOTE: do not clamp scales here. GaussianModel.get_state already
+    # applies the internal scaling ceiling driven by cameras_extent.
+    # Clamping exported scales to an absolute [1e-4, 0.1] breaks runs where
+    # scenes are intentionally not normalized (e.g. --no_normalize).
+
 
     save_ply(str(out / "final.ply"),     gaussians)
     save_splat(str(out / "final.splat"), gaussians)

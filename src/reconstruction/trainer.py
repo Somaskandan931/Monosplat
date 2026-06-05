@@ -90,10 +90,16 @@ class Trainer:
         experiment_cfg = cfg.get("experiment", {})
         run_dir = experiment_cfg.get("run_dir")
         if run_dir:
-            from core.experiments.artifact_manager import ArtifactManager
-            from core.experiments.run_tracker import RunTracker
-            self._run_tracker = RunTracker(run_dir)
-            self._artifact_manager = ArtifactManager(run_dir)
+            # core/ may not exist in this repo. Best-effort instrumentation only.
+            try:
+                from core.experiments.artifact_manager import ArtifactManager
+                from core.experiments.run_tracker import RunTracker
+                self._run_tracker = RunTracker(run_dir)
+                self._artifact_manager = ArtifactManager(run_dir)
+            except Exception:
+                self._run_tracker = None
+                self._artifact_manager = None
+
 
         try:
             import gsplat  # noqa: F401
@@ -156,9 +162,10 @@ class Trainer:
 
             self._update_lr(iteration)
 
-            # FIX-D: periodic VRAM cleanup every 500 iters
+            # FIX-D: periodic VRAM cleanup; previews every 250 iters for faster debug feedback
             if iteration % 500 == 0:
                 torch.cuda.empty_cache()
+            if iteration % 250 == 0:
                 self._save_preview(iteration)
 
             self._maybe_densify(iteration)
@@ -173,7 +180,9 @@ class Trainer:
                     self.model.one_up_sh_degree()
 
             ckpt_iters = self.cfg.get("training", {}).get("checkpoint_iterations", [])
-            if iteration in ckpt_iters:
+            # Colab-safe: checkpoint every 500 iters even between config milestones.
+            # Prevents losing >8 min of GPU time on a runtime disconnect.
+            if iteration in ckpt_iters or (iteration % 500 == 0 and iteration > 0):
                 ckpt_path = self._save_checkpoint(iteration)
                 self._last_good_ckpt = ckpt_path
 
@@ -218,18 +227,27 @@ class Trainer:
         log.info("[Trainer] Optimizer initialised with %d parameter groups.", len(param_groups))
 
     def _update_lr(self, iteration: int) -> None:
-        """Exponential decay schedule for xyz position learning rate."""
-        lr_cfg   = self._lr_cfg
-        t        = iteration / max(lr_cfg["position_lr_max_steps"], 1)
-        delay    = lr_cfg["position_lr_delay_mult"]
-        lr_init  = lr_cfg["position_lr_init"]
-        lr_final = lr_cfg["position_lr_final"]
-        log_interp = (1 - delay) * (-(t ** 2)) + delay
-        new_lr = lr_final + (lr_init - lr_final) * max(0.0, log_interp)
+        """Exponential log-linear LR decay (original 3DGS schedule)."""
+        import math
+
+        lr_cfg    = self._lr_cfg
+        lr_init   = lr_cfg["position_lr_init"]
+        lr_final  = lr_cfg["position_lr_final"]
+        delay     = lr_cfg["position_lr_delay_mult"]
+        max_steps = max(lr_cfg["position_lr_max_steps"], 1)
+
+        t = iteration / max_steps
+        if t >= 1.0:
+            new_lr = lr_final
+        else:
+            log_lerp = (1.0 - t) * math.log(max(lr_init, 1e-15)) + t * math.log(max(lr_final, 1e-15))
+            new_lr = math.exp(log_lerp) * (delay + (1.0 - delay) * t)
+
         for group in self.optimizer.param_groups:
             if group.get("name") == "xyz":
                 group["lr"] = new_lr
                 break
+
 
     # ------------------------------------------------------------------
     # Render
@@ -372,15 +390,25 @@ class Trainer:
             "model":     self.model.state_dict(),
             "optimizer": self.optimizer.state_dict(),
             "scaler":    self.scaler.state_dict() if self.scaler else {},
+            "max_log_scale": getattr(self.model, "_max_log_scale", None),
         }, ckpt_path)
+
 
         log.info(f"[Trainer] Checkpoint saved: {ckpt_path}")
         if self._artifact_manager is not None:
             self._artifact_manager.track(ckpt_path, kind="checkpoint", copy_to_run=True)
         drive_checkpoint_dir = self.cfg.get("runtime", {}).get("drive_checkpoint_dir")
         if drive_checkpoint_dir:
-            from core.reconstruction import CheckpointManager
-            CheckpointManager().mirror_checkpoint(ckpt_path, drive_checkpoint_dir)
+            # Best-effort mirror only; avoids dependency on missing core/.
+            try:
+                import shutil
+                src = Path(ckpt_path)
+                dst_root = Path(drive_checkpoint_dir)
+                dst_root.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst_root / src.name)
+            except Exception:
+                pass
+
         return ckpt_path
 
     def resume_from_checkpoint(self, ckpt_path: str) -> None:
@@ -396,6 +424,13 @@ class Trainer:
         self.optimizer.load_state_dict(state["optimizer"])
         if self.scaler and state.get("scaler"):
             self.scaler.load_state_dict(state["scaler"])
+
+        # Restore init scale ceiling so post-resume densification/cloning
+        # obeys the same _max_log_scale used during initialise_from_pcd.
+        max_log_scale = state.get("max_log_scale", None)
+        if max_log_scale is not None:
+            self.model._max_log_scale = float(max_log_scale)
+
 
         torch.cuda.empty_cache()
         with torch.no_grad():
@@ -500,13 +535,29 @@ class Trainer:
         # and prevents the scene from ever building up detail (grey/foggy output).
         # Clamping to max(extent, 1.0) restores standard 3DGS behaviour.
         extent = max(self.scene.cameras_extent, 1.0)
+
+        # Enable screen-size pruning only after a warmup window so large
+        # screen-space floaters get removed once coverage has built up.
+        max_screen = 0
+        if iteration > (self.densify_from_iter + 1000):
+            max_screen = 20
+
+        before = self.model.get_xyz.shape[0]
+
         self.model.densify_and_prune(
             max_grad=self.densify_grad_threshold,
             min_opacity=0.005,
             extent=extent,
-            max_screen_size=0,
+            max_screen_size=max_screen,
             optimizer=self.optimizer,
         )
+
+        after = self.model.get_xyz.shape[0]
+        log.info(
+            "[DENSIFY] iter=%d  before=%d  after=%d  delta=%+d  extent=%.4f",
+            iteration, before, after, after - before, extent,
+        )
+
 
     # ------------------------------------------------------------------
     # Experiment metrics

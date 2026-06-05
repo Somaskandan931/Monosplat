@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 from backend.app.database.session import SessionLocal, get_db
 from backend.app.models.orm import Job
 from backend.app.workers.job_runner import create_job, submit_background_job
-from backend.app.services.project_service import DatasetService
+
 
 router = APIRouter()
 
@@ -36,7 +36,6 @@ _OUTPUTS_ROOT = Path("data/outputs")
 _RESULTS_ROOT = Path("data/results")
 _executor     = ProcessPoolExecutor(max_workers=2)
 
-_ds_svc = DatasetService()
 
 
 # ---------------------------------------------------------------------------

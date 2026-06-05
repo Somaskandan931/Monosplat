@@ -210,14 +210,19 @@ def get_video_info(video_path: str) -> dict:
 # ---------------------------------------------------------------------------
 
 def estimate_motion(image_dir: str) -> float:
-    from core.dataset_analysis.motion_analyzer import estimate_motion as _estimate_motion
-    return _estimate_motion(image_dir)
+    # core/ may not exist in this repo; fall back to lightweight motion scoring.
+    try:
+        from core.dataset_analysis.motion_analyzer import estimate_motion as _estimate_motion  # type: ignore
+        return _estimate_motion(image_dir)
+    except Exception:
+        pass
 
     try:
         import cv2
     except ImportError:
         print("[extract] ⚠ opencv not installed — skipping motion estimation.")
         return 0.1
+
 
     frames = _image_files(Path(image_dir))
     if len(frames) < 2:
@@ -260,17 +265,13 @@ def filter_blurry_images(image_dir: str, threshold: float = 120.0) -> int:
     Blurry images are MOVED to a 'blurry' subfolder instead of deleted,
     which is safer on Windows (avoids file-lock errors).
     """
-    from core.dataset_analysis.blur_detector import move_blurry_images
-    kept = move_blurry_images(image_dir, threshold=threshold)
-    if kept < 15:
-        print("[extract] âš   WARNING: Very few sharp frames! Try recording in better light.")
-    return kept
-
+    # Prefer local implementation; avoids core/ dependency.
     try:
         import cv2
     except ImportError:
         print("[extract] ⚠  opencv-python not installed — skipping blur filter.")
         return len(_image_files(Path(image_dir)))
+
 
     import gc
 
@@ -424,14 +425,13 @@ def filter_low_feature_frames(
     min_features: int = 50,
     min_keep_ratio: float = 0.9,
 ) -> int:
-    from core.dataset_analysis.texture_analyzer import remove_low_feature_frames
-    return remove_low_feature_frames(image_dir, min_keep_ratio=min_keep_ratio)
-
+    # Prefer local implementation; avoids core/ dependency.
     try:
         import cv2
     except ImportError:
         print("[extract] ⚠ opencv-python not installed — skipping feature filter.")
         return len(_image_files(Path(image_dir)))
+
 
     image_dir = Path(image_dir)
     frames = _image_files(image_dir)
@@ -503,6 +503,7 @@ def filter_duplicate_viewpoints(
     min_keep_ratio: float = 0.5,
 ) -> int:
     """
+
     Remove near-duplicate frames that hurt COLMAP bundle adjustment.
 
     Two-stage filter:

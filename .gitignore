@@ -13,8 +13,9 @@
 
 # =========================
 
-**pycache**/
-*.py[cod]
+__pycache__/
+*.pyc
+
 *.pyo
 *.pyd
 *.so

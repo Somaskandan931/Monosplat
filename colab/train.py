@@ -36,8 +36,56 @@ from dataset.loader       import ColmapDataset
 from reconstruction.gaussian_model import GaussianModel
 from reconstruction.trainer         import Trainer
 
-# ── core/reconstruction is always present (no hardware/experiments deps) ─────
-from core.reconstruction import CheckpointManager
+# Core checkpoint manager may not exist in this repo (no core/ directory).
+# Use a minimal local checkpoint manager instead.
+from typing import Optional, Dict, Any
+
+class CheckpointManager:
+    """Minimal checkpoint helper for Colab + Desktop.
+
+    Responsibilities:
+      - auto-resume from an existing checkpoint if --resume not provided
+      - optional mirroring of checkpoints to a drive directory
+
+    File format: torch.save(dict) containing at least:
+      iteration, model, optimizer, scaler
+    """
+
+    def __init__(self, checkpoints_dir: Path, mirror_dir: Optional[Path] = None):
+        self.checkpoints_dir = checkpoints_dir
+        self.mirror_dir = mirror_dir
+
+    def auto_resume_path(self, resume_path: Optional[str]) -> Optional[Path]:
+        if resume_path:
+            p = Path(resume_path)
+            return p if p.exists() else None
+        latest = self.latest_checkpoint_path()
+        return latest
+
+    def latest_checkpoint_path(self) -> Optional[Path]:
+        if not self.checkpoints_dir.exists():
+            return None
+        ckpts = sorted(self.checkpoints_dir.glob("checkpoint_*.ckpt"), key=lambda p: p.stat().st_mtime)
+        return ckpts[-1] if ckpts else None
+
+    def write_resume_report(self, report_path: Path, resume_path: Optional[Path]) -> None:
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {"resume_path": str(resume_path) if resume_path else None}
+        report_path.write_text(__import__("json").dumps(payload), encoding="utf-8")
+
+    def mirror_checkpoint(self, ckpt_path: str | Path, drive_checkpoint_dir: str | Path) -> None:
+        src = Path(ckpt_path)
+        if not src.exists():
+            return
+        dst_root = Path(drive_checkpoint_dir)
+        dst_root.mkdir(parents=True, exist_ok=True)
+        dst = dst_root / src.name
+        try:
+            __import__("shutil").copy2(src, dst)
+        except Exception:
+            # Best-effort mirror only
+            pass
+
 
 log = logging.getLogger(__name__)
 logging.basicConfig(
@@ -46,7 +94,8 @@ logging.basicConfig(
 )
 
 # ── Safety constants ──────────────────────────────────────────────────────────
-MAX_INIT_GAUSSIANS: int = 60_000
+MAX_INIT_GAUSSIANS: int = 20_000  # Colab-safe: 20k initial Gaussians prevent OOM on T4
+# Raise to 40000 for L4, 60000 for A100 via MONOSPLAT_EXTRA_TRAIN_ARGS env var if needed
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -305,7 +354,9 @@ def main() -> None:
     cameras_extent_raw = cameras_extent
     cameras_extent = max(cameras_extent, 1.0)
     log.info(
-        "cameras_extent = %.4f (raw) → %.4f (floored to 1.0 after normalization)",
+        "cameras_extent raw=%.4f → clamped=%.4f  "
+        "(clamped to 1.0 so densify_and_prune screen-size thresholds are correct; "
+        "raw < 1.0 means normalize_scene compressed cameras — this is expected)",
         cameras_extent_raw, cameras_extent,
     )
     dataset.cameras_extent = cameras_extent

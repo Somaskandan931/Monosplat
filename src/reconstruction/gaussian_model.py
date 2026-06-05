@@ -198,9 +198,16 @@ class GaussianModel(nn.Module):
         sh_rest = torch.zeros(n, (self.max_sh_degree + 1) ** 2 - 1, 3)
 
         # FIX D: chunked nearest-neighbour instead of O(N²) cdist
-        dist2 = _distCUDA2(xyz) if xyz.is_cuda else _dist_cpu_chunked(xyz)
-        dist2 = torch.clamp_min(dist2, 1e-7)
-        scales = torch.log(torch.sqrt(dist2)).unsqueeze(-1).repeat(1, 3)
+        # - _distCUDA2 returns squared L2 distances
+        # - _dist_cpu_chunked returns L2 distances (not squared)
+        if xyz.is_cuda:
+            dist_sq = _distCUDA2(xyz)
+            dist = torch.sqrt(dist_sq.clamp_min(1e-7))
+        else:
+            dist = _dist_cpu_chunked(xyz).clamp_min(1e-7)
+
+        scales = torch.log(dist).unsqueeze(-1).repeat(1, 3)
+
 
         # FP-1: clamp initial log-scales to [-4, _max_log_scale].
         # Old hard ceiling was 0.0 (exp(0) = 1.0 world-unit).  After
