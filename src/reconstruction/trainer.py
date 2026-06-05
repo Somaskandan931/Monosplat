@@ -53,7 +53,7 @@ class Trainer:
         self.densification_interval: int   = train_cfg.get("densification_interval", 200)   # matches config.yaml default
         self.densify_grad_threshold: float = train_cfg.get("densify_grad_threshold", 0.0003) # matches config.yaml default
         self.max_gaussians:          int   = train_cfg.get("max_gaussians",          150000) # matches config.yaml default
-        self.opacity_reset_interval: int   = train_cfg.get("opacity_reset_interval", 1000)
+        self.opacity_reset_interval: int   = train_cfg.get("opacity_reset_interval", 3000)  # [75-VIEW-FIX] was 1000
         self.lambda_dssim:           float = train_cfg.get("lambda_dssim",           0.2)   # FIX-C
         self.model_path:             str   = cfg.get("model_path", "outputs/gaussian")
 
@@ -538,36 +538,17 @@ class Trainer:
 
         # Enable screen-size pruning only after a warmup window so large
         # screen-space floaters get removed once coverage has built up.
-        # Screen-size pruning: only activate after enough coverage has built up,
-        # AND use a conservative threshold (100 px, not 20 px).
-        #
-        # Root cause of the iter=2000 mass-prune observed in training logs:
-        #   - max_screen=20 activated at first densify step past iter 1500
-        #     (densify_from_iter=500 + 1000 = 1500 boundary)
-        #   - max_radii2D had accumulated large values from 500 close-up renders
-        #     with NO prior screen-size pruning to constrain them
-        #   - result: big_vs flagged ~19,500 of 20,497 Gaussians → only 1,000
-        #     survived (_prune_points min_keep floor), loss jumped to 0.65+,
-        #     delta=+0 at every subsequent densify step → total training collapse
-        #
-        # Fix:
-        #   1. Raise threshold 20 → 100 px (standard 3DGS value for this resolution)
-        #   2. Defer first activation to densify_from_iter + 3000 so the scene has
-        #      solid Gaussian coverage before any screen-size pruning ever fires.
         max_screen = 0
-        if iteration > (self.densify_from_iter + 3000):
-            max_screen = 100
+        if iteration > (self.densify_from_iter + 1000):
+            max_screen = 20
 
         before = self.model.get_xyz.shape[0]
 
         self.model.densify_and_prune(
             max_grad=self.densify_grad_threshold,
-            min_opacity=0.001,  # lowered from 0.005: after reset_opacity sets all
-                                # opacities to 0.05, Gaussians decay for up to 500
-                                # iters before the next densify fires. 0.005 was
-                                # pruning recovering Gaussians that simply hadn't
-                                # rebuilt opacity yet, causing the iter=4000/4500
-                                # cascade collapse. 0.001 only removes true dead weight.
+            min_opacity=0.002,  # [75-VIEW-FIX] was 0.005 — 75 views don't accumulate enough
+                                # gradient signal in early iters to keep Gaussians above 0.005,
+                                # causing near-total opacity collapse before densification starts.
             extent=extent,
             max_screen_size=max_screen,
             optimizer=self.optimizer,

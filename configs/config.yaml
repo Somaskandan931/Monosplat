@@ -39,7 +39,15 @@
 #           unit ceiling made every Gaussian a giant translucent blob → grey fog.
 #   [FP-2]  cameras_extent floored to 1.0 in train.py after normalization so
 #           densify_and_prune() screen-size thresholds are computed correctly.
-#   [T&T-1] max_gaussians: 80000 → 200000 (T4).  T&T outdoor scenes require
+#   [75V-1]  densify_grad_threshold: 0.0003 → 0.0005.  75 training views produce
+#            sparse per-region gradients; 0.0003 barely triggered clone/split while
+#            pruning ran at full speed → Gaussian count collapsed to ~357 by iter 100.
+#   [75V-2]  opacity_reset_interval: 1000 → 3000.  With 75 views, Gaussians need more
+#            iterations to accumulate enough photometric support before the first reset.
+#            Resetting at iter 1000 wiped out Gaussians that had not yet proved themselves.
+#   [75V-3]  min_opacity in trainer.py: 0.005 → 0.002.  Root cause of the collapse —
+#            75 views don't generate enough gradient signal in early iters to keep
+#            Gaussians above the 0.005 prune threshold before densification starts.
 #           200k–500k Gaussians to represent buildings/structures without gaps.
 #   [T&T-2] densify_until_iter: 8000 → 16000 (T4).  For large scenes,
 #           densification should run deep into training, not stop at 2/3.
@@ -66,11 +74,13 @@ training:
   densify_until_iter: 16000   # [T&T-2] was 8000 — must run deep for large scenes
 
   densification_interval: 200 # [T&T-5] was 500 — more frequent fill for sparse coverage
-  densify_grad_threshold: 0.0003  # [T&T-4] was 0.0005 — slightly more aggressive split/clone
+  densify_grad_threshold: 0.0005  # [75-VIEW-FIX] was 0.0003 — less aggressive; 75 views
+                                  # produce sparse gradients per region, 0.0003 barely fires clone/split
 
   max_gaussians: 200000       # [T&T-1] was 80000 — T4 T&T baseline
 
-  opacity_reset_interval: 1000
+  opacity_reset_interval: 3000  # [75-VIEW-FIX] was 1000 — give Gaussians 3000 iters to
+                                 # establish opacity before the first reset wipes them out
 
   lambda_opacity_reg: 0.001
   lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
