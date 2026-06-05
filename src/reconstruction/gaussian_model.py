@@ -331,20 +331,10 @@ class GaussianModel(nn.Module):
         self._densify_and_split(grads, max_grad, extent, optimizer)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
-
-        # big_ws: prune world-scale floaters every densify step, unconditionally.
-        # CRITICAL: must NOT be gated inside `if max_screen_size > 0`.
-        # When gated, Gaussians grew unchecked for 3000 iters (delta=+0 window),
-        # then the first activation of screen-size pruning at iter=4000 caused
-        # a cascade collapse (20k→8k→4k) because big_ws flagged thousands of
-        # inflated Gaussians all at once.
-        # Running it every step keeps sizes in check incrementally.
-        big_ws = self.get_scaling.max(dim=1).values > 0.5 * extent
-        prune_mask = prune_mask | big_ws
-
         if max_screen_size > 0:
             big_vs = self.max_radii2D > max_screen_size
-            prune_mask = prune_mask | big_vs
+            big_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
+            prune_mask = prune_mask | big_vs | big_ws
 
         self._prune_points(prune_mask, optimizer)
         self.xyz_gradient_accum.zero_()
@@ -437,11 +427,7 @@ class GaussianModel(nn.Module):
             mask = fixed
 
         keep = ~mask
-        # min_keep: safety floor so we never prune to zero.
-        # 1000 was too high — it masked the iter=2000 mass-prune symptom and left
-        # a ghost 1k-Gaussian population that could never densify (delta=+0 forever).
-        # 100 is enough to survive any single bad prune step without hiding bugs.
-        min_keep = min(100, self._xyz.shape[0])
+        min_keep = min(1000, self._xyz.shape[0])
 
         if int(keep.sum().item()) < min_keep:
             opacity = self.get_opacity.detach().squeeze(-1)
