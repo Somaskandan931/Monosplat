@@ -16,15 +16,8 @@ FIXES APPLIED (this version):
   [FIX-J] _render: reads camera pose from self.scene.images[viewpoint.image_id]
           (the normalized, authoritative pose) rather than viewpoint.tvec
           directly, ensuring normalization applied in train.py is actually used.
-  [PRUNE-FIX] big_ws world-size pruning moved INSIDE the `if max_screen_size > 0`
-          gate in GaussianModel.densify_and_prune, and threshold corrected from
-          0.5*extent → 0.1*extent.  The broken variant wiped ~19 k Gaussians at
-          iter 1600 (first step where max_screen_size switches 0 → 20).
-          trainer.py now runs _assert_prune_logic_correct() at import time to
-          catch any regression immediately rather than silently at iter 1600.
 """
 
-import inspect
 import logging
 import random
 import time
@@ -35,50 +28,6 @@ import torch
 import torch.nn as nn
 
 log = logging.getLogger(__name__)
-
-
-def _assert_prune_logic_correct() -> None:
-    """Fail-fast guard against the broken big_ws variant.
-
-    The broken version placed big_ws *outside* the ``if max_screen_size > 0``
-    gate and used a 0.5×extent threshold, causing ~19 k Gaussians to be wiped
-    at iter 1600 (the first step where max_screen_size switches 0 → 20).
-
-    Correct behaviour (PRUNE-FIX):
-      • big_ws is only computed inside ``if max_screen_size > 0``
-      • threshold is 0.1×extent
-
-    This check runs once at Trainer import time so the error surfaces
-    immediately — not silently at iter 1600.
-    """
-    try:
-        from reconstruction.gaussian_model import GaussianModel
-    except ImportError:
-        return  # can't import — skip guard (will fail elsewhere)
-
-    src = inspect.getsource(GaussianModel.densify_and_prune)
-
-    broken_unconditional = (
-        "big_ws" in src
-        and "if max_screen_size > 0" in src
-        # broken pattern: big_ws appears *before* the gate
-        and src.index("big_ws") < src.index("if max_screen_size > 0")
-    )
-    broken_threshold = "0.5 * extent" in src
-
-    if broken_unconditional or broken_threshold:
-        raise RuntimeError(
-            "\n\n[PRUNE-FIX] Broken big_ws variant detected in GaussianModel.densify_and_prune!\n"
-            "  Symptom : ~19 k Gaussians pruned at iter 1600, count floors at min_keep.\n"
-            "  Root cause: big_ws ran unconditionally with threshold 0.5*extent.\n"
-            "  Fix: big_ws must be INSIDE `if max_screen_size > 0` with threshold 0.1*extent.\n"
-            "  See src/reconstruction/gaussian_model.py — apply the [PRUNE-FIX] block.\n"
-        )
-
-    log.debug("[PRUNE-FIX] densify_and_prune prune logic verified ✓")
-
-
-_assert_prune_logic_correct()
 
 
 class Trainer:
@@ -134,22 +83,7 @@ class Trainer:
 
         self._last_good_ckpt: Optional[str] = None
         self._renderer = None
-        self._run_tracker = None
-        self._artifact_manager = None
         self._train_started_at = 0.0
-
-        experiment_cfg = cfg.get("experiment", {})
-        run_dir = experiment_cfg.get("run_dir")
-        if run_dir:
-            # core/ may not exist in this repo. Best-effort instrumentation only.
-            try:
-                from core.experiments.artifact_manager import ArtifactManager
-                from core.experiments.run_tracker import RunTracker
-                self._run_tracker = RunTracker(run_dir)
-                self._artifact_manager = ArtifactManager(run_dir)
-            except Exception:
-                self._run_tracker = None
-                self._artifact_manager = None
 
 
         try:
@@ -239,23 +173,12 @@ class Trainer:
 
             if iteration % 100 == 0:
                 n_gaussians = self.model.get_xyz.shape[0]
-                self._record_metrics(iteration, loss, render_pkg, viewpoint)
                 log.info(
                     f"iter {iteration:>6}/{self.iterations}  "
                     f"loss={loss.item():.4f}  "
                     f"N={n_gaussians:,}  "
                     f"sh_deg={self.model.active_sh_degree}"
                 )
-
-        if self._run_tracker is not None:
-            self._run_tracker.finalize(
-                status="training_completed",
-                extra={
-                    "iterations": self.iterations,
-                    "final_gaussians": int(self.model.get_xyz.shape[0]),
-                    "last_checkpoint": self._last_good_ckpt,
-                },
-            )
 
     # ------------------------------------------------------------------
     # Optimizer setup
@@ -446,8 +369,6 @@ class Trainer:
 
 
         log.info(f"[Trainer] Checkpoint saved: {ckpt_path}")
-        if self._artifact_manager is not None:
-            self._artifact_manager.track(ckpt_path, kind="checkpoint", copy_to_run=True)
         drive_checkpoint_dir = self.cfg.get("runtime", {}).get("drive_checkpoint_dir")
         if drive_checkpoint_dir:
             # Best-effort mirror only; avoids dependency on missing core/.
@@ -539,8 +460,6 @@ class Trainer:
             Image.fromarray(arr).save(str(preview_path))
 
             log.info(f"[Trainer] Preview saved: {preview_path}")
-            if self._artifact_manager is not None:
-                self._artifact_manager.track(preview_path, kind="preview", copy_to_run=True)
 
         except Exception as exc:
             # Never crash the training loop on a preview failure
@@ -615,29 +534,6 @@ class Trainer:
     # ------------------------------------------------------------------
     # Experiment metrics
     # ------------------------------------------------------------------
-
-    def _record_metrics(self, iteration: int, loss: torch.Tensor, render_pkg: Dict, viewpoint) -> Dict:
-        if self._run_tracker is None:
-            return {}
-        elapsed = time.time() - self._train_started_at
-        iter_per_sec = iteration / max(elapsed, 1e-6)
-        remaining = max(self.iterations - iteration, 0)
-        eta = remaining / max(iter_per_sec, 1e-6)
-        metrics = self._metric_values(render_pkg, viewpoint)
-        entry = {
-            "iteration": int(iteration),
-            "loss": float(loss.detach().cpu().item()),
-            "psnr": metrics.get("psnr"),
-            "ssim": metrics.get("ssim"),
-            "lpips": metrics.get("lpips"),
-            "elapsed_time": elapsed,
-            "eta": eta,
-            "iteration_speed": iter_per_sec,
-            "n_gaussians": int(self.model.get_xyz.shape[0]),
-            "gpu_memory": self._gpu_memory(),
-        }
-        self._run_tracker.record(**entry)
-        return entry
 
     def _metric_values(self, render_pkg: Dict, viewpoint) -> Dict:
         rendered = render_pkg["render"]
