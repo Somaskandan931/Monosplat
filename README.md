@@ -10,7 +10,7 @@
 ![FFmpeg](https://img.shields.io/badge/FFmpeg-required-red)
 ![COLMAP](https://img.shields.io/badge/COLMAP-3.8+-purple)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
-![Status](https://img.shields.io/badge/Status-v2.1.0-success)
+![Status](https://img.shields.io/badge/Status-v3.0.0-success)
 
 ---
 
@@ -208,6 +208,7 @@ If you are reviewing the project quickly, start here:
   - [Algorithmic Pseudocode](#algorithmic-pseudocode)
 - [Project Architecture](#project-architecture)
 - [Codebase Structure](#codebase-structure)
+- [Folder Reference](#folder-reference)
 - [Design Deep-Dives](#design-deep-dives)
   - [GaussianModel (`src/reconstruction/gaussian_model.py`)](#gaussianmodel)
   - [GaussianTrainer (`src/reconstruction/trainer.py`)](#gaussiantrainer)
@@ -640,14 +641,14 @@ def rasterize(Gaussians, camera):
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │              Frame Extraction  (FFmpeg)                     │
-│   scripts/extract_frames.py                                 │
+│   src/preprocessing/extract_frames.py                       │
 │   outputs/frames/*.jpg                                      │
 └───────────────────────────┬─────────────────────────────────┘
                             │
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │            COLMAP Sparse Reconstruction                     │
-│   scripts/run_colmap.py  →  src/preprocessing/colmap_runner │
+│   src/preprocessing/colmap_runner.py                        │
 │   outputs/sparse/sparse_text/                               │
 │     cameras.txt · images.txt · points3D.txt                 │
 └───────────────────────────┬─────────────────────────────────┘
@@ -663,7 +664,7 @@ def rasterize(Gaussians, camera):
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │           Gaussian Splatting Training  (GPU)                │
-│   scripts/train.py                                          │
+│   colab/train.py                                            │
 │   src/reconstruction/gaussian_model.py + trainer.py        │
 │   src/renderer/renderer.py  (gsplat or software fallback)   │
 │   outputs/checkpoints/checkpoint_*.ckpt                     │
@@ -673,7 +674,7 @@ def rasterize(Gaussians, camera):
                             ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                      Export                                 │
-│   scripts/export_splat.py                                   │
+│   colab/export_splat.py                                     │
 │   outputs/exports/final.ply                                 │
 │   outputs/exports/final.splat                               │
 │   (opacity clamped [0,1]; scales clamped [1e-4, 0.1])       │
@@ -694,84 +695,228 @@ All stages can be run individually or end-to-end via `scripts/pipeline.py` or th
 
 ## Codebase Structure
 
-```monosplat/
+```
+monosplat/
 ├── backend/
 │   └── app/
-│       ├── main.py                       # FastAPI app factory; mounts /results static files
-│       ├── api/routes.py                 # 5 endpoints: upload, status, upload-results, results, projects
-│       ├── api/v2/routes.py              # Extended v2 API (experiments, datasets, reports)
-│       ├── database/session.py           # SQLAlchemy engine + session (SQLite default)
-│       ├── models/orm.py                 # ORM models: User, Project, Dataset, Experiment, TrainingRun, Model, Report, Job, RunMetric
-│       ├── schemas/api.py                # Pydantic request/response schemas
-│       ├── services/                     # pipeline_service, result_service, training_service, export_service,
-│       │                                 # project_service, experiment_service, dataset_analysis_service, prediction_service
+│       ├── main.py                       # FastAPI app factory; mounts all routes and static files
+│       ├── api/routes.py                 # 6 REST endpoints: upload, status, download, upload-results, results, projects
+│       ├── database/session.py           # SQLAlchemy engine + get_db() dependency
+│       ├── models/orm.py                 # ORM tables: Job, Project, TrainingRun, RunMetric
+│       ├── services/                     # pipeline_service, result_service, experiment_service,
+│       │                                 # dataset_analysis_service
+│       ├── utils/paths.py                # Shared path helpers
 │       └── workers/job_runner.py         # ProcessPoolExecutor-based background job system
 ├── frontend/
 │   └── src/
 │       ├── App.tsx                       # React Router — Dashboard, DatasetManager, Training, Experiments, Reports, Viewer
-│       ├── api/client.ts                 # Axios API client; all typed endpoint calls
+│       ├── api/client.ts                 # Axios API client; reads VITE_API_URL
 │       ├── api/hooks/                    # useJob (polling), useProjects, useRuns
 │       ├── components/                   # AppShell, Sidebar, TopBar, MetricsChart, UI primitives
 │       ├── pages/                        # Dashboard, DatasetManager, TrainingDashboard, Experiments, Reports, Viewer
-│       ├── store/appStore.ts             # Zustand store — activeJobId, selectedRunId
-│       └── types/api.ts                  # TypeScript types mirroring backend Pydantic schemas
-├── core/
-│   ├── dataset_analysis/                 # blur_detector, coverage_estimator, exposure_analyzer,
-│   │                                     # motion_analyzer, texture_analyzer, dynamic_object_detector, quality_report
-│   ├── evaluation/                       # evaluation_report, fps_benchmark, lpips, psnr, ssim
-│   ├── experiments/                      # artifact_manager, comparison, experiment_manager, run_tracker, metadata
-│   ├── explainability/                   # explainability_engine, failure_analyzer, recommendation_engine,
-│   │                                     # dataset_report, training_report
-│   ├── frame_selection/                  # duplicate_remover, frame_ranker, keyframe_selector, selection_engine
-│   ├── hardware/                         # hardware_detector, profile_manager
-│   ├── quality_prediction/               # success_predictor
-│   └── reconstruction/                   # checkpoint_manager
+│       ├── store/appStore.ts             # Zustand global state — activeJobId, selectedRunId
+│       └── types/api.ts                  # TypeScript types mirroring backend response shapes
 ├── colab/
 │   ├── train.py                          # Gaussian Splat training entry point (runs on Colab GPU or local)
 │   └── export_splat.py                   # Export checkpoint → .ply / .splat (opacity+scale clamping)
 ├── configs/
-│   ├── config.yaml                       # Base config (training, model, renderer, data, colmap sections)
-│   ├── base.yaml                         # Canonical base defaults
-│   ├── t4.yaml                           # T4 GPU tier overrides (12k iters, 80k Gaussians)
-│   ├── l4.yaml                           # L4 GPU tier overrides (18k iters, 120k Gaussians)
-│   └── a100.yaml                         # A100 GPU tier overrides (30k iters, 250k Gaussians)
+│   └── config.yaml                       # Single source of truth for all training and pipeline settings.
+│                                         # GPU-tier overrides (T4/L4/A100) applied at runtime via
+│                                         # MONOSPLAT_EXTRA_TRAIN_ARGS env var — no separate yaml files
 ├── notebooks/
 │   └── monosplat_colab_gpu.ipynb         # GPU launcher (GPU diagnostic + VRAM flush + Drive sync)
 ├── scripts/
 │   ├── pipeline.py                       # End-to-end preprocessing orchestrator (callable from backend)
-│   ├── prepare_dataset.py                # video → frames + COLMAP + Colab ZIP
-│   ├── extract_frames.py                 # Re-export shim → src/preprocessing/extract_frames.py
-│   ├── run_colmap.py                     # COLMAP runner with 4-tier adaptive fallback
-│   ├── validate_outputs.py               # Output artifact validation
-│   └── verify_pipeline.py               # End-to-end pipeline verification checks
+│   └── prepare_dataset.py                # video → frames + COLMAP + Colab ZIP
 ├── src/
-│   ├── dataset/loader.py
+│   ├── dataset/loader.py                 # ColmapDataset — reads cameras.txt + images.txt → Camera list
 │   ├── preprocessing/
-│   │   ├── colmap_runner.py
-│   │   ├── extract_frames.py
+│   │   ├── colmap_runner.py              # COLMAP subprocess runner (4-tier adaptive fallback)
+│   │   ├── extract_frames.py             # FFmpeg frame extraction + multi-stage quality filtering
 │   │   ├── normalize_scene.py            # Scene normalization — camera positions → unit ball
-│   │   └── utils.py
+│   │   └── utils.py                      # Reads COLMAP text files into Python dataclasses
 │   ├── reconstruction/
-│   │   ├── gaussian_model.py
-│   │   ├── trainer.py                    # Preview saves every 500 iters → outputs/gaussian/previews/
-│   │   └── loss.py
+│   │   ├── gaussian_model.py             # GaussianModel — all learnable parameters + densify/prune
+│   │   ├── trainer.py                    # GaussianTrainer — training loop, previews every 250 iters
+│   │   └── loss.py                       # L1 + SSIM + LPIPS + PSNR
 │   ├── renderer/
-│   │   ├── renderer.py
-│   │   └── camera.py
+│   │   ├── renderer.py                   # gsplat-first with pure-PyTorch software fallback
+│   │   └── camera.py                     # Pinhole camera dataclass (gsplat-compatible)
 │   └── utils/
-│       ├── colmap_utils.py
-│       ├── config_loader.py
-│       ├── console.py
-│       ├── env_detect.py
-│       ├── image_utils.py
-│       ├── io_utils.py
-│       ├── math_utils.py
-│       ├── metrics.py
-│       └── vram.py
+│       ├── colmap_utils.py               # load_colmap_model(), get_sparse_point_cloud()
+│       ├── config_loader.py              # load_config() → _ConfigProxy (dict + attribute access)
+│       ├── env_detect.py                 # has_cuda_colmap(), is_colab(), get_env_info()
+│       ├── image_utils.py                # load/save images, tensor conversion, compute_psnr()
+│       ├── io_utils.py                   # save/load PLY, splat, checkpoint, JSON (atomic writes)
+│       ├── math_utils.py                 # look_at(), perspective_matrix(), quaternion helpers
+│       └── metrics.py                    # PipelineMetrics, TrainingMetricsLog
+├── docs/
+│   ├── architecture.md                   # System architecture overview
+│   └── foggy_preview_fix.md              # Root-cause analysis of the foggy preview bug
 ├── requirements.txt
 └── requirements-colab.txt
-
 ```
+
+---
+
+## Folder Reference
+
+This section provides a file-by-file reference for every folder in the repository. For design rationale behind each component, see [Design Deep-Dives](#design-deep-dives).
+
+### `backend/`
+
+FastAPI server that powers the local desktop UI. Exposes a REST API consumed by the React frontend. The backend does **not** run training — it handles upload, preprocessing, result import, and serving the viewer.
+
+| File | Purpose |
+|------|---------|
+| `app/main.py` | FastAPI app factory. Mounts all routes and serves static files (including the viewer) |
+| `app/api/routes.py` | All 6 REST endpoints: `POST /upload`, `GET /status/{id}`, `GET /download/{id}/colab-package`, `POST /upload-results/{id}`, `GET /results/{id}`, `GET /projects` |
+| `app/database/session.py` | SQLAlchemy engine setup, `Base`, and `get_db()` dependency |
+| `app/models/orm.py` | Database tables: `Job`, `Project`, `TrainingRun`, `RunMetric` |
+| `app/services/pipeline_service.py` | Thin wrapper over `scripts/pipeline.py` — called by background workers |
+| `app/services/experiment_service.py` | CRUD helpers for projects and training runs (used by `GET /projects`) |
+| `app/services/result_service.py` | Unpacks the Colab results ZIP (`final.ply` + `final.splat`) into `data/results/` |
+| `app/services/dataset_analysis_service.py` | Dataset quality analysis helpers |
+| `app/utils/paths.py` | Shared path resolution helpers |
+| `app/workers/job_runner.py` | Manages async job lifecycle using `ProcessPoolExecutor` — updates Job status in the DB |
+| `requirements-backend.txt` | Python dependencies for the backend only (FastAPI, SQLAlchemy, uvicorn, etc.) |
+
+---
+
+### `colab/`
+
+The two Python files that run inside Google Colab (or locally with a CUDA GPU).
+
+| File | Purpose |
+|------|---------|
+| `train.py` | **Primary training entry point.** Loads config, runs scene normalization, initializes Gaussians from the COLMAP point cloud, and calls `Trainer.train()` |
+| `export_splat.py` | Loads a `.ckpt` checkpoint and exports `final.ply` + `final.splat`. Clamps opacity to `[0, 1]` and scale to `[1e-4, 0.1]` before writing. Can also convert an existing `.ply` to `.splat` |
+
+---
+
+### `configs/`
+
+| File | Purpose |
+|------|---------|
+| `config.yaml` | **Single source of truth for all training and pipeline settings.** Covers training hyperparameters (iterations, densification, learning rates), model settings (SH degree), renderer limits, COLMAP options, and runtime/Drive settings. GPU-tier overrides (T4/L4/A100) are applied at runtime via the `MONOSPLAT_EXTRA_TRAIN_ARGS` environment variable set in the Colab notebook — there are no separate per-GPU config files |
+
+---
+
+### `docs/`
+
+| File | Purpose |
+|------|---------|
+| `architecture.md` | System architecture overview |
+| `foggy_preview_fix.md` | Root-cause analysis and fix for the foggy preview bug — explains why P99 point cloud filtering was added to `normalize_scene.py` |
+
+---
+
+### `frontend/`
+
+React + TypeScript desktop UI. Communicates with the backend over HTTP.
+
+| Path | Purpose |
+|------|---------|
+| `src/App.tsx` | Root component. Sets up the router and wraps everything in `AppShell` |
+| `src/main.tsx` | Vite entry point |
+| `src/api/client.ts` | Axios base client. Reads `VITE_API_URL` from environment |
+| `src/api/hooks/useJob.ts` | `usePollJob()` — polls `GET /status/{id}` on an interval |
+| `src/api/hooks/useProjects.ts` | Fetches project list from `GET /projects` |
+| `src/api/hooks/useRuns.ts` | Fetches training runs for a given project |
+| `src/components/charts/MetricsChart.tsx` | Loss and PSNR curves (recharts) shown on the training dashboard |
+| `src/components/layout/` | `AppShell`, `Sidebar`, `TopBar` — shared layout chrome |
+| `src/components/ui/index.tsx` | Shared UI primitives (buttons, cards, etc.) |
+| `src/pages/Dashboard.tsx` | Job status overview |
+| `src/pages/DatasetManager.tsx` | Video upload and pipeline progress monitoring |
+| `src/pages/TrainingDashboard.tsx` | Live training metrics (loss, Gaussian count, previews) |
+| `src/pages/Viewer.tsx` | 3DGS splat viewer — loads `final.splat` from the backend static route |
+| `src/pages/Experiments.tsx` | Project and training run list |
+| `src/pages/Reports.tsx` | Quality and reconstruction reports |
+| `src/store/appStore.ts` | Zustand global state (current job ID, active project, etc.) |
+| `src/types/api.ts` | TypeScript types matching the backend API response shapes |
+
+---
+
+### `notebooks/`
+
+| File | Purpose |
+|------|---------|
+| `monosplat_colab_gpu.ipynb` | **The Colab notebook.** 13 cells: GPU check → mount Drive → clone repo → install deps → upload dataset ZIP → extract → verify → **train with live output streaming** → view previews → validate outputs → save to Drive → download splat. Cell 8b lets you view rendered preview images at any point during training |
+
+---
+
+### `scripts/`
+
+CLI tools for **local** preprocessing (runs on your machine, not Colab).
+
+| File | Purpose |
+|------|---------|
+| `prepare_dataset.py` | **Full local preprocessing pipeline in one command.** Takes a video or image folder, runs frame extraction (FFmpeg), COLMAP sparse reconstruction, output validation, and packages everything into a ZIP ready for Colab upload |
+| `pipeline.py` | Programmatic version of the same pipeline, callable from Python code (used by the backend's `pipeline_service.py` when a video is uploaded via the desktop UI) |
+
+```bash
+# Typical usage
+python scripts/prepare_dataset.py --video my_scene.mp4
+# Produces: <job_id>_for_colab.zip  ← upload this to Colab
+```
+
+---
+
+### `src/`
+
+The shared Python library. Both `colab/train.py` and `backend/` import from here. Nothing in `src/` runs on its own — it is always called by a script, notebook, or the backend.
+
+#### `src/dataset/`
+
+| File | Purpose |
+|------|---------|
+| `loader.py` | `ColmapDataset` — reads `cameras.txt` + `images.txt`, builds a list of `Camera` objects used during training |
+
+#### `src/preprocessing/`
+
+| File | Purpose |
+|------|---------|
+| `normalize_scene.py` | **Scene normalization.** Translates the scene centroid to the origin and scales it using the camera radius. Filters COLMAP point cloud outliers at P99 before scaling — this was the root cause of the foggy preview bug |
+| `colmap_runner.py` | Runs COLMAP as a subprocess (`feature_extractor` → `exhaustive_matcher` → `mapper` → `model_converter`). Handles GPU/CPU detection and 4-tier adaptive retry logic |
+| `extract_frames.py` | FFmpeg-based frame extraction from video. Includes blur filtering, resolution validation, feature-count filtering, exposure validation, and motion estimation |
+| `utils.py` | Reads COLMAP text-format files (`cameras.txt`, `images.txt`, `points3D.txt`) into Python dataclasses |
+
+#### `src/reconstruction/`
+
+| File | Purpose |
+|------|---------|
+| `gaussian_model.py` | The 3D Gaussian representation. Holds all learnable parameters (positions, colours, scales, rotations, opacities). Implements `initialise_from_pcd()`, `densify_and_prune()`, and `reset_opacity()`. Memory-efficient batched KNN for large point clouds |
+| `trainer.py` | The training loop. Renders each camera view, computes loss, backpropagates, runs densification every N iterations. Saves previews every **250 iterations** and checkpoints every **500 iterations**. Logs `[DENSIFY] before=/after=` diagnostics |
+| `loss.py` | L1 loss, SSIM loss, LPIPS perceptual loss, and `combined_loss()` which weights all three |
+
+#### `src/renderer/`
+
+| File | Purpose |
+|------|---------|
+| `renderer.py` | Wraps the `gsplat` rasterizer with a pure-PyTorch software fallback. Backend selected at construction time based on CUDA/gsplat availability |
+| `camera.py` | `Camera` dataclass. Stores intrinsics and extrinsics. Thread-safe (no mutable tensors). `Camera.from_colmap()` converts a COLMAP image record into this format |
+
+#### `src/utils/`
+
+| File | Purpose |
+|------|---------|
+| `config_loader.py` | `load_config(path)` — loads `config.yaml` and merges over hardcoded defaults. Returns a `_ConfigProxy` supporting both dict-style and attribute-style access |
+| `colmap_utils.py` | `load_colmap_model()` — loads all three COLMAP text files in one call. `get_sparse_point_cloud()` — extracts `(xyz, rgb)` numpy arrays |
+| `env_detect.py` | Runtime detection: `has_cuda_colmap()`, `should_use_gpu()`, `is_colab()`, `get_env_info()` |
+| `image_utils.py` | `load_image_rgb()`, `image_to_tensor()`, `tensor_to_image()`, `compute_psnr()` |
+| `io_utils.py` | File I/O for the full artifact lifecycle: `save_ply` / `load_ply`, `save_splat` / `load_splat_as_gaussians`, `save_checkpoint` / `load_checkpoint` (atomic write with integrity marker), `save_image`, `save_json` |
+| `math_utils.py` | 3D math helpers: `look_at()`, `perspective_matrix()`, `quaternion_to_rotation_matrix()`, `build_covariance_3d()`, `project_gaussian_2d()` |
+| `metrics.py` | `PipelineMetrics` — structured per-job metrics record. `TrainingMetricsLog` — append-only per-iteration loss/PSNR series with atomic flush |
+
+---
+
+### Root files
+
+| File | Purpose |
+|------|---------|
+| `requirements.txt` | Python dependencies for local development (preprocessing + training on a local GPU) |
+| `requirements-colab.txt` | Minimal dependency list installed by the Colab notebook (gsplat, plyfile, lpips, etc.) |
+| `.gitignore` | Excludes `data/`, `work/`, `outputs/`, `*.ckpt`, `*.splat`, `node_modules/`, `__pycache__/` |
 
 ---
 
@@ -1106,7 +1251,7 @@ outputs/sparse/sparse_text/images.txt
     → outputs/sparse/sparse_text/scene_norm.json
 ```
 
-Runs automatically at the end of `scripts/run_colmap.py`. Takes under one second on any machine. Non-fatal if it fails — training proceeds without normalization and a warning is printed.
+Runs automatically inside `colab/train.py` before Gaussian initialization. Takes under one second on any machine. Non-fatal if it fails — training proceeds without normalization and a warning is printed.
 
 ### Stage 4 — Gaussian Splat Training (PyTorch + gsplat, GPU required)
 
@@ -1114,7 +1259,7 @@ Runs automatically at the end of `scripts/run_colmap.py`. Takes under one second
 outputs/frames/ + outputs/sparse/sparse_text/
     → GaussianTrainer
     → outputs/checkpoints/checkpoint_*.ckpt
-    → outputs/gaussian/previews/preview_*.png   ← new: preview every 500 iters
+    → outputs/gaussian/previews/preview_*.png   ← preview every 250 iters
     → outputs/exports/final.ply
     → outputs/exports/final.splat
 ```
@@ -1125,10 +1270,10 @@ Training is an iterative process:
 3. Compute L1 + SSIM loss against the ground-truth frame
 4. Backpropagate and update all six learnable properties via Adam
 5. Accumulate per-Gaussian screen-space gradients
-6. Every 500 iters (between iter 500 and 5000): densify (clone + split) and prune
-7. Every 500 iters: save a training preview PNG from the first training camera
-8. Every 3000 iters: reset opacities
-9. Every 1000 iters: save checkpoint
+6. Every `densification_interval` iters (between iter 500 and `densify_until_iter`): densify (clone + split) and prune
+7. Every 250 iters: save a training preview PNG from the first training camera
+8. Every 1000 iters: reset opacities
+9. Every 500 iters: save checkpoint (Colab-safe — prevents losing GPU time on disconnect)
 
 At the end of training, the model is exported as both `.ply` and `.splat`.
 
@@ -1555,12 +1700,12 @@ Use for browser viewing, sharing, and demos.
 | OOM crash during KNN init | Computing full N×N distance matrix | Ensure you have the latest `gaussian_model.py` |
 | Training OOM | Too many Gaussians for VRAM | Lower `max_gaussians` in `configs/config.yaml` |
 | NaN loss during training | Degenerate Gaussians before first prune | Normal; trainer skips NaN iters automatically |
-| Colab times out | Long training run | Checkpoints save every 1k iters — resume with `--resume` |
+| Colab times out | Long training run | Checkpoints save every 500 iters — resume with `--resume` |
 | Drive mount fails (Cell 5) | Credential propagation error or not signed in | Restart runtime, sign in to Google Drive in browser, then re-run Cell 5 |
 | Giant / invisible splats in viewer | Opacity or scale exceeded safe range during training | Fixed in current `export_splat.py` — opacity clamped [0,1], scale clamped [1e-4, 0.1] |
-| Stretched geometry or splat explosion | Camera positions not normalized | `scene_norm.json` should be written by `run_colmap.py` automatically; check for normalization warning in logs |
-| `verify_pipeline.py` Frame count FAIL | Fewer than 20 frames extracted | Lower `--fps` or re-shoot with better coverage |
-| `verify_pipeline.py` COLMAP files FAIL | Missing `cameras.txt` / `images.txt` / `points3D.txt` | COLMAP did not complete — check for registration errors |
+| Stretched geometry or splat explosion | Camera positions not normalized | `scene_norm.json` is written automatically inside `colab/train.py` before training; check for normalization warning in logs |
+| Fewer frames extracted than expected | Blur filter or FPS too aggressive | Lower `--fps` threshold or re-shoot with better coverage |
+| COLMAP files missing before training | COLMAP did not complete | Check `prepare_dataset.py` output for registration errors |
 | No previews in `outputs/gaussian/previews/` | `_save_preview` suppressed an exception | Check training log for `[Trainer] Preview save failed` warnings |
 | Outputs lost after session ends | Drive was not mounted before training | Always run Cell 5 first; updated notebook raises an error if Drive is not mounted |
 
