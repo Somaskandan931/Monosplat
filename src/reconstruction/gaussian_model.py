@@ -330,6 +330,12 @@ class GaussianModel(nn.Module):
         self._densify_and_clone(grads, max_grad, extent, optimizer)
         self._densify_and_split(grads, max_grad, extent, optimizer)
 
+        # [PRUNE-FIX] big_ws MUST live inside the max_screen_size > 0 gate.
+        # The broken variant (threshold 0.5*extent, unconditional) wiped
+        # ~19 k Gaussians at iter 1600 on every run — the first step where
+        # max_screen_size switches from 0 → 20.  Correct behaviour:
+        #   • big_ws only fires together with big_vs (screen-size warmup guard)
+        #   • threshold is 0.1*extent, not 0.5*extent
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if max_screen_size > 0:
             big_vs = self.max_radii2D > max_screen_size
