@@ -5,13 +5,22 @@
 # MONOSPLAT_EXTRA_TRAIN_ARGS environment variable, which train.py reads through
 # _apply_env_overrides().  You do NOT need separate t4.yaml / l4.yaml / a100.yaml
 # files — those have been deleted.  Edit the HARDWARE_TIERS dict in the notebook
-# Cell 2 to change per-tier values.  The values below are the T4 (15 GB) baseline.
+# Cell 2 to change per-tier values.  The values below are the T4 (15 GB) baseline
+# tuned for Tanks and Temples style footage.
 #
-# ── TIER REFERENCE ────────────────────────────────────────────────────────────
+# ── TIER REFERENCE (T&T tuned) ────────────────────────────────────────────────
 #  GPU    VRAM   iterations  max_gaussians  densify_grad_threshold  lambda_lpips
-#  T4     15 GB  12000       80000          0.0005                  0.05  ← these defaults
-#  L4     22 GB  18000       120000         0.0004                  0.05
-#  A100   40 GB  30000       250000         0.0003                  0.1
+#  T4     15 GB  20000       200000         0.0003                  0.1   ← these defaults
+#  L4     22 GB  30000       350000         0.0002                  0.1
+#  A100   40 GB  40000       500000         0.0002                  0.1
+#
+# ── T&T DATASET vs VIDEO MODE ─────────────────────────────────────────────────
+# When using official Tanks and Temples image downloads (not your own video):
+#   colmap.camera_model: SIMPLE_RADIAL   (professional cameras, low distortion)
+#   data.max_frames: 300                 (use the full provided image set)
+# When using your own video footage of a T&T-style subject:
+#   colmap.camera_model: OPENCV          (phone cameras, radial distortion present)
+#   data.max_frames: 300
 #
 # ── CHANGELOG ─────────────────────────────────────────────────────────────────
 #   [FIX-1] Added `data` and `colmap` sections — prevent AttributeError in
@@ -30,39 +39,58 @@
 #           unit ceiling made every Gaussian a giant translucent blob → grey fog.
 #   [FP-2]  cameras_extent floored to 1.0 in train.py after normalization so
 #           densify_and_prune() screen-size thresholds are computed correctly.
+#   [T&T-1] max_gaussians: 80000 → 200000 (T4).  T&T outdoor scenes require
+#           200k–500k Gaussians to represent buildings/structures without gaps.
+#   [T&T-2] densify_until_iter: 8000 → 16000 (T4).  For large scenes,
+#           densification should run deep into training, not stop at 2/3.
+#   [T&T-3] iterations: 12000 → 20000 (T4).  T&T scenes with 150–300 views
+#           need more steps for coverage convergence.
+#   [T&T-4] densify_grad_threshold: 0.0005 → 0.0003.  Slightly more aggressive
+#           split/clone for large scenes with sparser view coverage per region.
+#   [T&T-5] densification_interval: 500 → 200.  More frequent densification
+#           helps fill scene gaps when coverage is spread over a large area.
+#   [T&T-6] data.max_frames: 180 → 300.  T&T benchmark uses 150–300 images.
+#           Fewer frames causes coverage gaps on occluded surfaces.
+#   [T&T-7] position_lr_max_steps synced to new iterations=20000.
+#   [T&T-8] save/checkpoint/test iterations updated to match 20000-iter schedule.
+#   [T&T-9] lambda_lpips: 0.05 → 0.1.  Higher perceptual weight needed for
+#           large outdoor scenes where structural sharpness matters more.
+#   [T&T-10] renderer.max_gaussians synced to training.max_gaussians=200000.
+#   [T&T-11] colmap.camera_model default changed to SIMPLE_RADIAL for T&T
+#            dataset downloads.  Set to OPENCV for phone video input.
 
 training:
-  iterations: 12000           # T4 baseline — notebook overrides for L4/A100
+  iterations: 20000           # [T&T-3] T4 baseline — notebook overrides for L4/A100
 
   densify_from_iter: 500
-  densify_until_iter: 8000    # T4 baseline
+  densify_until_iter: 16000   # [T&T-2] was 8000 — must run deep for large scenes
 
-  densification_interval: 500 # [FIX-3] was 300 → too many reallocations
-  densify_grad_threshold: 0.0005  # [FIX-2] standard 3DGS value
+  densification_interval: 200 # [T&T-5] was 500 — more frequent fill for sparse coverage
+  densify_grad_threshold: 0.0003  # [T&T-4] was 0.0005 — slightly more aggressive split/clone
 
-  max_gaussians: 80000        # T4 baseline — hard cap enforced in trainer.py
+  max_gaussians: 200000       # [T&T-1] was 80000 — T4 T&T baseline
 
   opacity_reset_interval: 1000
 
   lambda_opacity_reg: 0.001
-  lambda_dssim: 0.2           # [FIX-4] was 0.4 → over-weighted structural loss
-  lambda_lpips: 0.05          # LPIPS perceptual loss — critical for sharpness
+  lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
+  lambda_lpips: 0.1           # [T&T-9] was 0.05 — higher perceptual weight for outdoor scenes
 
   percent_dense: 0.01
 
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
   position_lr_delay_mult: 0.01
-  position_lr_max_steps: 12000  # must match iterations for T4
+  position_lr_max_steps: 20000  # [T&T-7] synced to new iterations
 
   feature_lr: 0.0025
   opacity_lr: 0.05
   scaling_lr: 0.005
   rotation_lr: 0.001
 
-  save_iterations: [1000, 5000, 8000, 12000]
-  checkpoint_iterations: [1000, 5000, 8000, 12000]  # [FIX-5] added 1000
-  test_iterations: [5000, 12000]
+  save_iterations: [1000, 5000, 10000, 15000, 20000]         # [T&T-8]
+  checkpoint_iterations: [1000, 5000, 10000, 15000, 20000]   # [T&T-8]
+  test_iterations: [10000, 20000]                             # [T&T-8]
 
 model:
   sh_degree: 3
@@ -71,7 +99,7 @@ renderer:
   # MUST equal training.max_gaussians — a lower value here silently caps the
   # Gaussian count written to the exported .ply / .splat, making the export
   # look blurrier than training previews even after a successful run.
-  max_gaussians: 80000        # keep in sync with training.max_gaussians
+  max_gaussians: 200000       # [T&T-10] synced to training.max_gaussians
 
 pipeline:
   convert_SHs_python: false
@@ -80,7 +108,7 @@ pipeline:
 
 # [FIX-1] data section — accessed by prepare_dataset.py
 data:
-  max_frames: 180             # T4 baseline (≈ 6 s video at 30 fps stride 1)
+  max_frames: 300             # [T&T-6] was 180 — T&T benchmark needs 150–300 images
   image_width: 0              # 0 = keep original COLMAP resolution
   image_height: 0
 
@@ -88,7 +116,9 @@ data:
 colmap:
   quality: medium             # low / medium / high
   binary_path: colmap         # path to colmap binary (or "colmap" if on PATH)
-  camera_model: OPENCV        # best for phone video — models radial distortion
+  # [T&T-11] SIMPLE_RADIAL for official T&T dataset downloads (professional cameras).
+  # Switch to OPENCV if using phone-recorded video of a T&T-style subject.
+  camera_model: SIMPLE_RADIAL
   single_camera: true         # all frames share one lens → single camera model
 
 runtime:

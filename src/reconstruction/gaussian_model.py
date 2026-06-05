@@ -331,10 +331,20 @@ class GaussianModel(nn.Module):
         self._densify_and_split(grads, max_grad, extent, optimizer)
 
         prune_mask = (self.get_opacity < min_opacity).squeeze()
+
+        # big_ws: prune world-scale floaters every densify step, unconditionally.
+        # CRITICAL: must NOT be gated inside `if max_screen_size > 0`.
+        # When gated, Gaussians grew unchecked for 3000 iters (delta=+0 window),
+        # then the first activation of screen-size pruning at iter=4000 caused
+        # a cascade collapse (20k→8k→4k) because big_ws flagged thousands of
+        # inflated Gaussians all at once.
+        # Running it every step keeps sizes in check incrementally.
+        big_ws = self.get_scaling.max(dim=1).values > 0.5 * extent
+        prune_mask = prune_mask | big_ws
+
         if max_screen_size > 0:
             big_vs = self.max_radii2D > max_screen_size
-            big_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
-            prune_mask = prune_mask | big_vs | big_ws
+            prune_mask = prune_mask | big_vs
 
         self._prune_points(prune_mask, optimizer)
         self.xyz_gradient_accum.zero_()

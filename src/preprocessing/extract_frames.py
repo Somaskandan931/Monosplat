@@ -10,7 +10,7 @@ ADAPTIVE PIPELINE:
     - No hard crash on low frame count — warning only
     - Motion detection via optical flow
     - Quality scoring system
-    - max_frames=150  (reduced from 1200 — excessive frames destroy SIFT matching quality)
+    - max_frames=300  (T&T benchmark needs 150–300 images; was 150 for small-object scans)
     - histogram + SSIM diversity filtering to remove near-duplicate viewpoints
 """
 
@@ -43,7 +43,7 @@ def _frame_selection_report_path(image_dir: Path) -> Path:
     return image_dir.parent / "frame_selection_report.json"
 
 
-def run_smart_frame_selection(image_dir: str, budget: int = 150) -> dict:
+def run_smart_frame_selection(image_dir: str, budget: int = 300) -> dict:
     """Run budgeted selection while preserving legacy top-level frame layout."""
     from core.frame_selection import SmartFrameSelectionEngine
 
@@ -1017,7 +1017,7 @@ def copy_images(
     image_dir:  str,
     output_dir: str,
     extensions: tuple = (".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG"),
-    max_frames: int   = 150,
+    max_frames: int   = 300,
 ) -> int:
     image_dir  = Path(image_dir)
     output_dir = Path(output_dir)
@@ -1065,7 +1065,7 @@ if __name__ == "__main__":
     parser.add_argument("--output",         default="data/processed")
     parser.add_argument("--fps",            type=float, default=None,
                         help="Frames per second (default: adaptive by duration)")
-    parser.add_argument("--max_frames",     type=int,   default=150)
+    parser.add_argument("--max_frames",     type=int,   default=300)
     parser.add_argument("--blur_threshold", type=float, default=80.0)
     parser.add_argument("--no_adaptive",    action="store_true")
     args = parser.parse_args()

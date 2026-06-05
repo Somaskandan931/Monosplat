@@ -562,7 +562,12 @@ class Trainer:
 
         self.model.densify_and_prune(
             max_grad=self.densify_grad_threshold,
-            min_opacity=0.005,
+            min_opacity=0.001,  # lowered from 0.005: after reset_opacity sets all
+                                # opacities to 0.05, Gaussians decay for up to 500
+                                # iters before the next densify fires. 0.005 was
+                                # pruning recovering Gaussians that simply hadn't
+                                # rebuilt opacity yet, causing the iter=4000/4500
+                                # cascade collapse. 0.001 only removes true dead weight.
             extent=extent,
             max_screen_size=max_screen,
             optimizer=self.optimizer,
