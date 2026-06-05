@@ -75,8 +75,11 @@
 training:
   iterations: 20000           # [T&T-3] T4 baseline — notebook overrides for L4/A100
 
-  densify_from_iter: 1000       # [COLLAPSE-FIX] was 500 — extra 500-iter stabilization window
-  densify_until_iter: 16000   # [T&T-2] was 8000 — must run deep for large scenes
+  # NO-DENSIFY MODE: densify_from_iter > densify_until_iter so the window
+  # never opens.  The trainer.py loop also has _maybe_densify commented out,
+  # so this is belt-and-suspenders.
+  densify_from_iter: 999999      # effectively disables densification
+  densify_until_iter: 0          # window [999999, 0] is empty
 
   densification_interval: 200 # [T&T-5] was 500 — more frequent fill for sparse coverage
   densify_grad_threshold: 0.0002  # [COLLAPSE-FIX] was 0.0005 — lower threshold fires more
