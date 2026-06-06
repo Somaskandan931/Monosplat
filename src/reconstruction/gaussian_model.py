@@ -511,10 +511,71 @@ def _dist_cpu_chunked(xyz: Tensor, chunk_size: int = 4096) -> Tensor:
     return min_dists
 
 
+def _dist_gpu_chunked(xyz: Tensor, chunk_q: int = 8_192, chunk_r: int = 8_192) -> Tensor:
+    """
+    Correct self-KNN on GPU via double-chunked pairwise distances.
+
+    Used when simple_knn is unavailable or N exceeds its safe limit.
+    Memory per step: chunk_q × chunk_r × 4 bytes ≈ 256 MB at defaults —
+    well within T4/A100 headroom after the point cloud is loaded.
+
+    Time: O(ceil(N/chunk_q) × ceil(N/chunk_r)) cdist calls.
+    For N=100k, chunk=8k: ~13×13 = 169 steps, typically < 10 s on T4.
+    """
+    n      = xyz.shape[0]
+    dev    = xyz.device
+    min_d2 = torch.full((n,), float("inf"), device=dev)
+
+    for q_start in range(0, n, chunk_q):
+        q_end = min(q_start + chunk_q, n)
+        q     = xyz[q_start:q_end]           # (cq, 3)
+
+        for r_start in range(0, n, chunk_r):
+            r_end = min(r_start + chunk_r, n)
+            r     = xyz[r_start:r_end]        # (cr, 3)
+
+            d2 = torch.cdist(q, r).pow(2)     # (cq, cr)
+
+            # Mask self-distances where query and reference windows overlap
+            if q_start < r_end and r_start < q_end:
+                ov_q = torch.arange(
+                    max(q_start, r_start) - q_start,
+                    min(q_end,   r_end)   - q_start,
+                    device=dev,
+                )
+                ov_r = ov_q + (max(q_start, r_start) - r_start)
+                d2[ov_q, ov_r] = float("inf")
+
+            chunk_min = d2.min(dim=1).values
+            min_d2[q_start:q_end] = torch.minimum(min_d2[q_start:q_end], chunk_min)
+
+    return min_d2
+
+
+# simple_knn's distCUDA2 uses 32-bit tile arithmetic that overflows and writes
+# out of bounds (cudaErrorIllegalAddress / SIGABRT) when N exceeds ~65k points.
+# Points above this threshold are routed through _dist_gpu_chunked instead.
+_SIMPLE_KNN_SAFE_N = 65_000
+
+
 def _distCUDA2(xyz: Tensor) -> Tensor:
-    """Nearest-neighbour squared distance (CUDA fast path via simple_knn)."""
+    """
+    Nearest-neighbour squared distance.
+
+    Priority:
+      1. simple_knn.distCUDA2  — fast, but only safe for N ≤ _SIMPLE_KNN_SAFE_N
+      2. _dist_gpu_chunked     — correct for any N, runs on CUDA if available
+      3. _dist_cpu_chunked     — CPU fallback when no CUDA device is present
+    """
+    n = xyz.shape[0]
     try:
         from simple_knn._C import distCUDA2  # type: ignore
-        return distCUDA2(xyz)
+        if n <= _SIMPLE_KNN_SAFE_N:
+            return distCUDA2(xyz)
+        # N is too large for simple_knn — fall through to chunked GPU path
     except ImportError:
-        return _dist_cpu_chunked(xyz.cpu()).to(xyz.device)
+        pass
+
+    if xyz.is_cuda:
+        return _dist_gpu_chunked(xyz)
+    return _dist_cpu_chunked(xyz.cpu()).to(xyz.device)

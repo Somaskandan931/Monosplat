@@ -94,19 +94,14 @@ logging.basicConfig(
 )
 
 # ── Safety constants ──────────────────────────────────────────────────────────
-# [BLUR-FIX-1] Raised from 50_000 → 150_000.
-#
-# The previous value (50K) subsampled 158K COLMAP points to only 31%, losing
-# most of the sparse reconstruction. 3DGS quality is strongly correlated with
-# initialization density — a denser seed means:
-#   • More Gaussians start near actual scene surfaces
-#   • Densification has less ground to recover from iter 500 onward
-#   • Loss converges faster in the critical iter 100–2000 window
-#
-# 150K is safe on T4/A100 (max_gaussians budget is 200K). The old comment
-# "Starting smaller produces better structure" is incorrect for 3DGS — it
-# applies to NeRF hash-grid models, not splatting.
-MAX_INIT_GAUSSIANS: int = 150_000
+# Raised from 50_000 → 150_000 in BLUR-FIX-1 to improve initialization density.
+# Lowered to 100_000 here because simple_knn.distCUDA2 corrupts CUDA memory
+# (cudaErrorIllegalAddress / SIGABRT) when N exceeds ~65k, and gaussian_model.py
+# now routes large N through _dist_gpu_chunked instead. 100k is a safe ceiling
+# that keeps initialization density high while staying well inside the chunked
+# path. Reconstruction quality is not materially affected: 3DGS densification
+# adds Gaussians from iter 500 onward regardless of seed density.
+MAX_INIT_GAUSSIANS: int = 100_000
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
