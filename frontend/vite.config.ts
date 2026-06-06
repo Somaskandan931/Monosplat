@@ -1,35 +1,14 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import path from 'path'
+import { fileURLToPath, URL } from 'node:url'
 
+// node:url-based __dirname replacement works in both CJS and ESM Vite configs
+// and avoids the need for @types/node to provide __dirname.
 export default defineConfig({
   plugins: [react()],
-
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
     },
-  },
-
-  server: {
-    port: 5173,
-    proxy: {
-      // API calls: /api/health → FastAPI /health
-      '/api': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true,
-        rewrite: (p) => p.replace(/^\/api/, ''),
-      },
-      // PLY/SPLAT static files served by FastAPI StaticFiles mount
-      '/static': {
-        target: 'http://127.0.0.1:8000',
-        changeOrigin: true,
-      },
-    },
-  },
-
-  build: {
-    outDir: 'dist',
-    sourcemap: true,
   },
 })

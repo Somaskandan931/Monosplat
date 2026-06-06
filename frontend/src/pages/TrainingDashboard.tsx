@@ -177,7 +177,7 @@ export default function TrainingDashboard() {
           {/* Stats */}
           <div className="grid grid-cols-3 gap-4">
             <StatCard label="Active Runs" value={activeRuns.length} icon={<Cpu size={16} />} accent={activeRuns.length > 0 ? 'text-amber-400' : 'text-dim'} />
-            <StatCard label="Total Runs" value={runsData?.total ?? 0} icon={<RotateCcw size={16} />} accent="text-cobalt" />
+            <StatCard label="Total Runs" value={runsData?.meta.total ?? 0} icon={<RotateCcw size={16} />} accent="text-cobalt" />
             <StatCard
               label="Best PSNR"
               value={

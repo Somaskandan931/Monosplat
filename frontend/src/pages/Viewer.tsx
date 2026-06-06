@@ -1,4 +1,5 @@
-// src/pages/Viewer.tsx
+/// <reference types="vite/client" />
+// src/pages/Viewer.tsx — fix PLYLoader import path and implicit any types
 import { Suspense, useRef, useState, useEffect } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, Stats } from '@react-three/drei'
@@ -50,10 +51,10 @@ function PlyCloud({ url }: { url: string }) {
     setGeo(null)
     setError(null)
     setLoading(true)
-    import('three/examples/jsm/loaders/PLYLoader').then(({ PLYLoader }) => {
+    import('three/addons/loaders/PLYLoader.js').then(({ PLYLoader }) => {
       new PLYLoader().load(
         url,
-        (g) => {
+        (g: THREE.BufferGeometry) => {
           g.computeVertexNormals()
           // If no vertex colours, generate a neutral grey palette so the
           // pointsMaterial vertexColors flag doesn't produce a black cloud.
@@ -67,7 +68,7 @@ function PlyCloud({ url }: { url: string }) {
           setLoading(false)
         },
         undefined,
-        (e) => { setError(String(e)); setLoading(false) },
+        (e: unknown) => { setError(String(e)); setLoading(false) },
       )
     })
   }, [url])

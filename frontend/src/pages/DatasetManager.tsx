@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // src/pages/DatasetManager.tsx
 import { useCallback, useState, useEffect, useRef } from 'react'
 import { useDropzone } from 'react-dropzone'

@@ -1,3 +1,4 @@
+/// <reference types="vite/client" />
 // src/api/client.ts
 import axios from 'axios'
 import type {
