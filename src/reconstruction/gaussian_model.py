@@ -39,7 +39,12 @@ ROOT CAUSE FIXES (June 2026 — zero densification + opacity collapse):
         was 0.011 — below ALL initial scales → clone never fired → delta=+0 every
         step from iter 600 through 5800.
   RC-3. _densify_and_split threshold: matched to 0.1 (was 0.01) for consistency.
-  RC-4. big_ws prune threshold: 0.1 * extent → 0.5 * extent.
+  RC-5. _densify_and_split stale-grads size mismatch.
+        grads is computed from N_orig Gaussians. _densify_and_clone appends
+        N_clone new rows before split runs → grads.shape[0] != self._xyz.shape[0]
+        → RuntimeError. Fix: snapshot n_orig before clone, pass it to split so
+        it slices grads[:n_orig] and indexes self.get_scaling[:n_orig].
+        prune_selected also extended to cover the full post-clone+split model size.
         Old 0.1*extent=0.11 was at or below initial scale ≈ 0.1 → all Gaussians
         flagged as big_ws when Stage 3 fires → 40K pruned to hard floor of 10K.
 """
@@ -339,11 +344,17 @@ class GaussianModel(nn.Module):
         optimizer=None,
     ) -> None:
         """Clone/split high-gradient Gaussians and prune transparent ones."""
+        # Snapshot grads BEFORE clone appends new Gaussians.
+        # _densify_and_clone extends self._xyz by N_clone rows; passing the same
+        # grads tensor to _densify_and_split afterward causes a size mismatch
+        # (grads: N_orig vs self.get_scaling: N_orig+N_clone) → RuntimeError.
+        # Fix: record n_orig and pass it to split so it only indexes pre-clone rows.
+        n_orig = self._xyz.shape[0]
         grads = self.xyz_gradient_accum / self.denom.clamp_min(1)
         grads[grads.isnan()] = 0.0
 
         self._densify_and_clone(grads, max_grad, extent, optimizer)
-        self._densify_and_split(grads, max_grad, extent, optimizer)
+        self._densify_and_split(grads, max_grad, extent, optimizer, n_orig=n_orig)
 
         # [PRUNE-FIX] big_ws MUST live inside the max_screen_size > 0 gate.
         # The broken variant (threshold 0.5*extent, unconditional) wiped
@@ -399,14 +410,24 @@ class GaussianModel(nn.Module):
         self._append_gaussians(new_tensors, optimizer)
 
     def _densify_and_split(
-        self, grads, grad_threshold, scene_extent, optimizer=None, N: int = 2
+        self, grads, grad_threshold, scene_extent, optimizer=None, N: int = 2,
+        n_orig: int = -1,
     ) -> None:
-        """Split large-scale Gaussians that have high screen-space gradient."""
-        n = self._xyz.shape[0]
+        """Split large-scale Gaussians that have high screen-space gradient.
+
+        n_orig: number of Gaussians before _densify_and_clone ran this step.
+                grads was computed from that snapshot, so we must only index
+                the first n_orig rows of the current (possibly larger) model.
+        """
+        # Use n_orig if provided; fall back to grads length as a safe upper bound.
+        n = n_orig if n_orig > 0 else grads.shape[0]
+        # grads may be shorter than current model if clone appended rows — slice to n.
+        grads_orig = grads[:n]
+
         selected = torch.zeros(n, dtype=torch.bool, device=self._xyz.device)
         selected_mask = (
-            (grads.squeeze(-1) >= grad_threshold)
-            & (self.get_scaling.max(dim=1).values > 0.1 * scene_extent)
+            (grads_orig.squeeze(-1) >= grad_threshold)
+            & (self.get_scaling[:n].max(dim=1).values > 0.1 * scene_extent)
         )
         selected[:len(selected_mask)] = selected_mask
         if not selected.any():
@@ -435,11 +456,15 @@ class GaussianModel(nn.Module):
         }
         self._append_gaussians(new_tensors, optimizer)
 
-        # Remove the originals that were split
-        prune_selected = torch.cat([
-            selected,
-            torch.zeros(N * selected.sum(), dtype=torch.bool, device=self._xyz.device),
-        ])
+        # Remove the original Gaussians that were split.
+        # Current model size after clone + this append:
+        #   n_total = n + N_clone_rows + N_split_rows
+        # prune_selected must be exactly n_total long:
+        #   - first n entries: True where we split (remove originals)
+        #   - remaining entries: False (keep cloned + newly split Gaussians)
+        n_total = self._xyz.shape[0]
+        prune_selected = torch.zeros(n_total, dtype=torch.bool, device=self._xyz.device)
+        prune_selected[:n] = selected
         self._prune_points(prune_selected, optimizer)
 
     def _prune_points(self, mask: Tensor, optimizer=None) -> None:
