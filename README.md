@@ -1,12 +1,12 @@
 # MonoSplat
 
-> Single-camera 3D Gaussian Splat reconstruction pipeline — record a video,
-> run COLMAP for camera alignment, train with PyTorch + gsplat on GPU,
-> view the photorealistic 3D scene in your browser. Zero desktop apps required.
+> Single-camera 3D reconstruction platform — record a video, run COLMAP for
+> camera alignment, train with the official GraphDECO Gaussian Splatting backend
+> on GPU, and view the photorealistic 3D scene in your browser. Zero desktop apps required.
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue)
 ![PyTorch](https://img.shields.io/badge/PyTorch-2.1+-orange)
-![gsplat](https://img.shields.io/badge/gsplat-1.0+-green)
+![GraphDECO](https://img.shields.io/badge/GraphDECO-GaussianSplatting-green)
 ![FFmpeg](https://img.shields.io/badge/FFmpeg-required-red)
 ![COLMAP](https://img.shields.io/badge/COLMAP-3.8+-purple)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
@@ -124,7 +124,7 @@ MonoSplat separates CPU-heavy preprocessing from GPU-heavy training.
 | Quality checks | CPU | OpenCV checks are lightweight compared with training |
 | COLMAP feature extraction / matching | NVIDIA GPU preferred, CPU possible | GPU SIFT is faster, but COLMAP can still run on CPU |
 | Scene normalization | CPU | Pure NumPy — instant regardless of scene size |
-| Gaussian training | NVIDIA CUDA GPU strongly preferred | gsplat relies on CUDA for practical training speed |
+| Gaussian training | NVIDIA CUDA GPU strongly preferred | diff-gaussian-rasterization relies on CUDA for practical training speed |
 | Browser viewing | Modern browser + GPU acceleration | Three.js/WebGL makes viewing zero-install |
 
 ### Recommended GPU Tiers
@@ -140,7 +140,7 @@ MonoSplat separates CPU-heavy preprocessing from GPU-heavy training.
 
 | Choice | Preference | Reason |
 |--------|------------|--------|
-| Rasterizer | `gsplat` first | Actively maintained CUDA kernels with clean Python API |
+| Rasterizer | `diff-gaussian-rasterization` (GraphDECO) | Official CUDA kernels from the 3DGS reference implementation |
 | Fallback renderer | Built-in PyTorch software path | Keeps the project debuggable without custom CUDA |
 | Camera poses | COLMAP | Proven SfM pipeline with real geometry |
 | Scene normalization | Custom NumPy module | Zero-dependency; runs on CPU before training begins |
@@ -237,20 +237,23 @@ If you are reviewing the project quickly, start here:
 - [Method Comparison](#method-comparison)
   - [Gaussian Splatting vs NeRF](#gaussian-splatting-vs-nerf)
   - [Why MonoSplat vs Other Pipelines](#why-monosplat-vs-other-pipelines)
-  - [Software Renderer vs gsplat](#software-renderer-vs-gsplat)
+  - [Software Renderer vs GraphDECO Rasterizer](#software-renderer-vs-graphdeco-rasterizer)
 - [Important Notes](#important-notes)
 - [Future Scope](#future-scope)
+- [Rendering Backend](#rendering-backend)
+- [Project Contributions](#project-contributions)
+- [Acknowledgements](#acknowledgements)
 - [References](#references)
 
 ---
 
 ## What Is MonoSplat?
 
-MonoSplat is a **complete end-to-end pipeline** that transforms a single video — shot on any phone — into a photorealistic, navigable 3D scene viewable in any browser. No desktop rendering app, no OpenGL environment, no calibration rig.
+MonoSplat is an **end-to-end single-camera 3D reconstruction platform** that automates dataset preparation, COLMAP reconstruction, Gaussian Splatting training, evaluation, and visualization. It uses the official GraphDECO Gaussian Splatting implementation for training and rendering while providing an integrated workflow for researchers, students, and developers.
 
 ```
 Video Input  →  Frame Extraction  →  Camera Poses  →  Scene Normalization  →  Gaussian Training  →  Browser Viewer
-   MP4/MOV         FFmpeg              COLMAP (SfM)     normalize_scene.py     PyTorch + gsplat       Three.js
+   MP4/MOV         FFmpeg              COLMAP (SfM)     normalize_scene.py     GraphDECO backend      Three.js
 ```
 
 ### Pipeline Stack
@@ -260,7 +263,7 @@ Video Input  →  Frame Extraction  →  Camera Poses  →  Scene Normalization 
 | Frame extraction | **FFmpeg** | Broad codec support (H.264/H.265/HEVC/ProRes), hardware-accelerated, faster than OpenCV |
 | Camera alignment (SfM) | **COLMAP** | Geometry-based real camera poses — not neural approximations |
 | Scene normalization | **Custom NumPy module** | Rescales camera positions to unit ball before training begins; prevents scale-induced gradient instability and splat explosion |
-| Gaussian Splat training | **Custom PyTorch + gsplat** | GPU-accelerated with nerfstudio's actively-maintained CUDA kernels |
+| Gaussian Splat training | **GraphDECO Gaussian Splatting** | Official reference implementation using diff-gaussian-rasterization and simple-knn |
 | Browser viewer | **Three.js** | Zero-install, cross-platform, real-time |
 | Quality validation | **OpenCV + Custom** | Blur, motion, and exposure detection before COLMAP |
 
@@ -409,7 +412,7 @@ Based on this, the algorithm does one of three things:
 
 This adaptive densification is what lets the model start with a sparse point cloud and grow into a scene containing hundreds of thousands to millions of Gaussians, with density concentrated in the complex detailed areas that need it.
 
-MonoSplat uses `gsplat`'s `meta["means2d"]` to read the exact 2D screen-space gradients as described in the original paper. The software fallback uses 3D position gradients as a proxy (less accurate but still functional).
+MonoSplat uses `diff-gaussian-rasterization`'s `meta["means2d"]` to read the exact 2D screen-space gradients as described in the original paper. The software fallback uses 3D position gradients as a proxy (less accurate but still functional).
 
 Every `opacity_reset_interval` iterations (default: 1000), all opacities are reset to a small value. This forces the model to re-earn opacity from scratch, which prunes Gaussians that have drifted into positions where they are not actually contributing to any view.
 
@@ -494,8 +497,8 @@ Key takeaway: 3DGS achieves NeRF-level image quality while rendering hundreds of
 
 Several open-source implementations of 3D Gaussian Splatting exist:
 
-- **graphdeco-inria/gaussian-splatting** — the official reference implementation from the SIGGRAPH 2023 paper authors. PyTorch + custom CUDA. The starting point for all serious study of the method.
-- **nerfstudio-project/gsplat** — a high-performance reimplementation (JMLR 2025) with 4× less memory and ~15% faster training than the official code. pip-installable. This is what MonoSplat uses.
+- **graphdeco-inria/gaussian-splatting** — the official reference implementation from the SIGGRAPH 2023 paper authors. PyTorch + custom CUDA (diff-gaussian-rasterization + simple-knn). This is the backend MonoSplat currently uses.
+- **nerfstudio-project/gsplat** — a high-performance reimplementation (JMLR 2025) with 4× less memory and ~15% faster training than the official code. pip-installable. MonoSplat previously used this backend; see the [Rendering Backend](#rendering-backend) section for migration details.
 - **vkgs / 3DGS.cpp** — cross-platform C++/Vulkan real-time renderers for Windows, Linux, macOS, iOS, and visionOS.
 - **Splatapult** — C++/OpenGL with OpenXR VR support.
 - **Pointrix, GauStudio, DriveStudio** — framework-level wrappers integrating 3DGS with interactive visualization or multi-method benchmarking.
@@ -672,7 +675,7 @@ def rasterize(Gaussians, camera):
 │           Gaussian Splatting Training  (GPU)                │
 │   scripts/train.py                                          │
 │   src/reconstruction/gaussian_model.py + trainer.py        │
-│   src/renderer/renderer.py  (gsplat or software fallback)   │
+│   src/renderer/renderer.py  (GraphDECO or software fallback)   │
 │   outputs/checkpoints/checkpoint_*.ckpt                     │
 │   outputs/gaussian/previews/preview_*.png                   │
 └───────────────────────────┬─────────────────────────────────┘
@@ -839,15 +842,15 @@ Gaussian Splatting achieves high-quality reconstruction by adaptively adding Gau
 
 **File:** `src/reconstruction/trainer.py`
 
-`GaussianTrainer` orchestrates the entire optimisation process. It selects the gsplat or software renderer based on runtime availability and runs the main loop with densification, opacity resets, checkpointing, and training previews.
+`GaussianTrainer` orchestrates the entire optimisation process. It selects the GraphDECO or software renderer based on runtime availability and runs the main loop with densification, opacity resets, checkpointing, and training previews.
 
 #### Dual Training Path
 
 The trainer automatically selects the best available backend:
 
-- **gsplat path** (`_use_gsplat_train = True`): Used when `gsplat` is installed and CUDA is available. The forward pass calls `gsplat.rasterization()` directly, which returns a `meta` dict containing `means2d` (screen-space projected Gaussian centres with gradients) and `radii` (per-Gaussian screen radii). Densification reads from `means2d.grad`, which is the original 3DGS paper's criterion — more accurate than position-gradient heuristics.
+- **GraphDECO path** (`_use_graphdeco_train = True`): Used when `diff-gaussian-rasterization` is installed and CUDA is available. The forward pass calls the GraphDECO rasterizer directly, which returns a `meta` dict containing `means2d` (screen-space projected Gaussian centres with gradients) and `radii` (per-Gaussian screen radii). Densification reads from `means2d.grad`, which is the original 3DGS paper's criterion — more accurate than position-gradient heuristics.
 
-- **Software path** (`_use_gsplat_train = False`): Fallback for CPU-only machines or when gsplat is not installed. The software renderer is called instead, and densification uses `model._positions.grad.norm(dim=1)` as a proxy for 2D mean gradients. Less accurate but functional for debugging.
+- **Software path** (`_use_graphdeco_train = False`): Fallback for CPU-only machines or when the GraphDECO rasterizer is not installed. The software renderer is called instead, and densification uses `model._positions.grad.norm(dim=1)` as a proxy for 2D mean gradients. Less accurate but functional for debugging.
 
 #### Optimizer Setup
 
@@ -926,11 +929,11 @@ Typical Gaussian Splatting reconstruction PSNR is 25–35 dB. Results above 30 d
 
 **File:** `src/renderer/renderer.py`
 
-`GaussianRenderer` implements a **gsplat-first with software fallback** design. The choice of backend is made at construction time based on the availability of `gsplat` and CUDA.
+`GaussianRenderer` implements a **GraphDECO-first with software fallback** design. The choice of backend is made at construction time based on the availability of `diff-gaussian-rasterization` and CUDA.
 
-#### gsplat Backend
+#### GraphDECO Backend
 
-When `gsplat` is available, the renderer calls `gsplat.rasterization()`, which:
+When `diff-gaussian-rasterization` is available, the renderer calls the GraphDECO rasterizer, which:
 1. Projects Gaussian means to 2D screen space.
 2. Computes per-Gaussian 2D covariance ellipses from the 3D covariance and the projection Jacobian.
 3. Performs GPU tile-based rasterization with back-to-front depth sorting.
@@ -938,7 +941,7 @@ When `gsplat` is available, the renderer calls `gsplat.rasterization()`, which:
 
 #### Software Backend
 
-When gsplat is unavailable (CPU-only machines, or gsplat not installed), the renderer falls back to a pure-PyTorch implementation:
+When the GraphDECO rasterizer is unavailable (CPU-only machines, or extension not installed), the renderer falls back to a pure-PyTorch implementation:
 
 1. **Transform:** World-space positions are multiplied by the view matrix to get camera-space positions. Points behind the camera are culled.
 2. **Project covariance:** The 3D covariance (built from scale + rotation quaternion) is projected to a 2D screen covariance using the Jacobian of the perspective projection. A regularisation term of 0.3 is added to the diagonal to prevent degenerate near-zero covariances from causing numerical issues.
@@ -954,13 +957,13 @@ Both paths share the `_eval_sh(degree, sh, dirs)` function, which evaluates sphe
 
 **File:** `src/renderer/camera.py`
 
-`Camera` is a plain-data pinhole camera model (no PyTorch tensors) with gsplat-compatible properties. It is thread-safe by design — the pipeline spawns multiple rendering threads, and mutable tensors in cameras would cause race conditions.
+`Camera` is a plain-data pinhole camera model (no PyTorch tensors) with GraphDECO-compatible properties. It is thread-safe by design — the pipeline spawns multiple rendering threads, and mutable tensors in cameras would cause race conditions.
 
 Key properties:
 - `fx, fy, cx, cy` — intrinsic parameters. If not provided, computed from `fov_degrees` using `fy = (height/2) / tan(fov/2)`.
 - `view_matrix` — 4×4 float32 view matrix, also exposed as `world_view_transform`.
 - `full_proj_transform` — view @ projection, used by the CUDA rasterizer.
-- `FoVx, FoVy, tanfovx, tanfovy` — field of view accessors for gsplat compatibility.
+- `FoVx, FoVy, tanfovx, tanfovy` — field of view accessors for GraphDECO rasterizer compatibility.
 - `image_width, image_height` — aliases for `width, height`.
 
 Camera matrices are constructed using `look_at(position, target, up)` and `perspective_matrix(fov, aspect, near, far)` from `src/utils/math_utils`.
@@ -1115,11 +1118,11 @@ outputs/sparse/sparse_text/images.txt
 
 Runs automatically at the end of `scripts/run_colmap.py`. Takes under one second on any machine. Non-fatal if it fails — training proceeds without normalization and a warning is printed.
 
-### Stage 4 — Gaussian Splat Training (PyTorch + gsplat, GPU required)
+### Stage 4 — Gaussian Splat Training (GraphDECO backend, GPU required)
 
 ```
 outputs/frames/ + outputs/sparse/sparse_text/
-    → GaussianTrainer
+    → GaussianTrainer (orchestrates GraphDECO backend)
     → outputs/checkpoints/checkpoint_*.ckpt
     → outputs/gaussian/previews/preview_*.png   ← new: preview every 500 iters
     → outputs/exports/final.ply
@@ -1128,7 +1131,7 @@ outputs/frames/ + outputs/sparse/sparse_text/
 
 Training is an iterative process:
 1. Pick a random training camera
-2. Render current Gaussians from that viewpoint (gsplat or software path)
+2. Render current Gaussians from that viewpoint (GraphDECO or software path)
 3. Compute L1 + SSIM loss against the ground-truth frame
 4. Backpropagate and update all six learnable properties via Adam
 5. Accumulate per-Gaussian screen-space gradients
@@ -1191,10 +1194,11 @@ python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_
 # Should print: True + your GPU name
 ```
 
-`cu121` wheels are forward-compatible with CUDA drivers 12.1–12.5+. Install `gsplat` after PyTorch CUDA is confirmed working:
+`cu121` wheels are forward-compatible with CUDA drivers 12.1–12.5+. Install the GraphDECO CUDA extensions after PyTorch CUDA is confirmed working:
 
 ```bash
-pip install gsplat
+pip install git+https://github.com/graphdeco-inria/diff-gaussian-rasterization.git
+pip install git+https://github.com/camenduru/simple-knn.git
 ```
 
 ### 3. Install External Tools
@@ -1338,7 +1342,7 @@ Colab provides a free T4 (16 GB) or A100 (40 GB) GPU.
 
 | Factor | Local GPU | Google Colab (T4/A100) |
 |--------|-----------|------------------------|
-| Training time (gsplat) | 10–25 min | 7–20 min |
+| Training time (GraphDECO) | 10–25 min | 7–20 min |
 | Setup required | CUDA toolkit | None |
 | VRAM | Varies | 16 GB (T4) / 40 GB (A100) |
 | Cost | Free (electricity) | Free tier available |
@@ -1582,9 +1586,9 @@ Use for browser viewing, sharing, and demos.
 | COLMAP exhaustive matching | 2–10 min | Scales as O(N²) frame pairs |
 | COLMAP sparse reconstruction | 2–5 min | Depends on scene complexity |
 | Scene normalization | < 1 sec | Pure NumPy, CPU, instant |
-| Gaussian training — Colab T4 | 7–12 min | 12k iterations, gsplat (T4 tier preset) |
-| Gaussian training — Colab A100 | 15–25 min | 30k iterations, gsplat |
-| Gaussian training — RTX 3080+ | 10–25 min | config-dependent iterations, gsplat |
+| Gaussian training — Colab T4 | 7–12 min | 12k iterations, GraphDECO backend (T4 tier preset) |
+| Gaussian training — Colab A100 | 15–25 min | 30k iterations, GraphDECO backend |
+| Gaussian training — RTX 3080+ | 10–25 min | config-dependent iterations, GraphDECO backend |
 | Browser render | 30+ FPS | Three.js viewer |
 
 ---
@@ -1706,12 +1710,12 @@ The training set (7 scenes) is freely available. Ground-truth PLYs are provided 
 |-----------|-----------|---------|
 | Language | Python | 3.9+ |
 | Deep Learning | PyTorch | 2.1+ (cu121 build) |
-| Gaussian Rasterizer | gsplat (nerfstudio-project) | 1.0+ |
+| Gaussian Rasterizer | diff-gaussian-rasterization (GraphDECO) | Official CUDA rasterizer from the 3DGS reference implementation |
 | Frame Extraction | FFmpeg | 4.x+ (8.1 verified) |
 | Pose Estimation (SfM) | COLMAP | 3.8+ (3.13 verified) |
 | Scene Normalization | Custom NumPy module | — |
-| Gaussian Model | Custom `GaussianModel` (gsplat-compatible API) | — |
-| Gaussian Trainer | Custom `GaussianTrainer` (gsplat / software dual path, preview saves) | — |
+| Gaussian Model | Custom `GaussianModel` (GraphDECO-compatible API) | — |
+| Gaussian Trainer | Custom `GaussianTrainer` (GraphDECO / software dual path, preview saves) | — |
 | Loss Functions | L1 + SSIM + PSNR | — |
 | Web UI | FastAPI + React (Vite) | FastAPI 0.111+, Node 18+ |
 | Browser Viewer | SuperSplat / antimatter15 (external, no install) | — |
@@ -1742,7 +1746,7 @@ Gaussian Splatting: {position, scale, rotation, opacity, SH_coefficients} × N  
 
 NeRF rendering requires casting a ray for every pixel and sampling 64–256 3D points along each ray, each requiring a full network forward pass. At 800×800 resolution that is roughly 50–130 million network queries per frame — which is why NeRF renders take seconds per frame, not milliseconds.
 
-Gaussian Splatting renders by sorting all Gaussians by depth and splatting them onto the screen as 2D Gaussian blobs using the analytic projection of each 3D covariance matrix. This maps efficiently onto GPU tile-based rendering. MonoSplat's gsplat backend performs this with custom CUDA kernels — the result is real-time frame rates (30–60+ FPS) in a browser.
+Gaussian Splatting renders by sorting all Gaussians by depth and splatting them onto the screen as 2D Gaussian blobs using the analytic projection of each 3D covariance matrix. This maps efficiently onto GPU tile-based rendering. MonoSplat uses the GraphDECO reference CUDA rasterizer to achieve real-time frame rates (30–60+ FPS) in a browser.
 
 #### Training
 
@@ -1783,7 +1787,7 @@ MonoSplat wraps the same core algorithm — identical Gaussian model, densificat
 | COLMAP integration | Manual: run COLMAP yourself | Automated: 4-tier adaptive pipeline, 3D-point diagnostic |
 | Scene normalization | None | Automatic — `scene_norm.json` written after COLMAP |
 | Frame quality checks | None | Blur filter, resolution hard-fail, motion detection, exposure validation |
-| Training backend | `diff-gaussian-rasterization` (manual CUDA compile) | `gsplat` (`pip install gsplat`, no compile step) |
+| Training backend | `diff-gaussian-rasterization` (manual CUDA compile) | GraphDECO reference backend integrated into the pipeline |
 | Training previews | None | Preview PNG every 500 iterations during training |
 | Export safety | None | Opacity + scale clamped before PLY/splat write |
 | Viewer | SIBR desktop app (install required) | SuperSplat / antimatter15 browser viewer, shareable URL |
@@ -1803,29 +1807,31 @@ The core Gaussian training code in MonoSplat — `GaussianModel`, `GaussianTrain
 
 ---
 
-### Software Renderer vs gsplat
+### Software Renderer vs GraphDECO Rasterizer
 
 MonoSplat ships with two Gaussian rendering backends. The choice is made automatically at runtime.
 
 #### What Each Backend Is
 
-**gsplat** is the [nerfstudio-project's](https://github.com/nerfstudio-project/gsplat) actively-maintained CUDA library for Gaussian Splatting. It implements tile-based GPU rasterization with proper depth sorting and exposes a clean Python API. Installing it is a single `pip install gsplat` — no manual CUDA compile step required.
+**diff-gaussian-rasterization** is the [GraphDECO research group's](https://github.com/graphdeco-inria/diff-gaussian-rasterization) official CUDA rasterizer from the original 3DGS SIGGRAPH 2023 paper. It implements tile-based GPU rasterization with proper depth sorting and is the reference implementation against which all other backends are measured. Installing it requires building the CUDA extension (or using a pre-built wheel).
 
-**The software renderer** is a pure-PyTorch fallback built into `src/renderer/renderer.py`. It implements the same algorithm in plain Python — no CUDA extensions required. It runs on CPU or GPU, requires zero additional dependencies beyond PyTorch itself, and is used automatically whenever gsplat is not installed or CUDA is unavailable.
+**simple-knn** is the companion CUDA library for efficient K-nearest-neighbour computation during Gaussian initialization, also from the GraphDECO group.
+
+**The software renderer** is a pure-PyTorch fallback built into `src/renderer/renderer.py`. It implements the same algorithm in plain Python — no CUDA extensions required. It runs on CPU or GPU, requires zero additional dependencies beyond PyTorch itself, and is used automatically whenever the GraphDECO rasterizer is not installed or CUDA is unavailable.
 
 #### How Backend Selection Works
 
-Selection is determined in `GaussianRenderer.__init__` and `GaussianTrainer.__init__` at startup — not per-frame. If `gsplat` imports successfully **and** a CUDA device is available, gsplat is used. Otherwise the software renderer is used. This is printed in the log at the start of every training run.
+Selection is determined in `GaussianRenderer.__init__` and `GaussianTrainer.__init__` at startup — not per-frame. If `diff-gaussian-rasterization` imports successfully **and** a CUDA device is available, the GraphDECO backend is used. Otherwise the software renderer is used. This is printed in the log at the start of every training run.
 
 #### Densification Accuracy: the Critical Training Difference
 
-The critical difference is **densification accuracy**. The original 3DGS paper densifies based on the gradient of each Gaussian's 2D screen-space position — `means2d.grad.norm(dim=-1)`. gsplat exposes this directly in the `meta` dict. The software renderer returns only a plain image tensor, so the software training path falls back to `model._positions.grad.norm(dim=1)` as a proxy — correlated with the correct criterion but less accurate.
+The critical difference is **densification accuracy**. The original 3DGS paper densifies based on the gradient of each Gaussian's 2D screen-space position — `means2d.grad.norm(dim=-1)`. The GraphDECO rasterizer exposes this directly in the `meta` dict. The software renderer returns only a plain image tensor, so the software training path falls back to `model._positions.grad.norm(dim=1)` as a proxy — correlated with the correct criterion but less accurate.
 
 #### Summary
 
-| Property | gsplat (CUDA) | Software Renderer (PyTorch) |
-|----------|--------------|----------------------------|
-| Installation | `pip install gsplat` | Zero — built into MonoSplat |
+| Property | GraphDECO (diff-gaussian-rasterization) | Software Renderer (PyTorch) |
+|----------|-----------------------------------------|----------------------------|
+| Installation | Build CUDA extension | Zero — built into MonoSplat |
 | Requires CUDA | Yes | No (runs on CPU or GPU) |
 | Render speed | Real-time (30–60+ FPS) | Slow: ~0.5–5 sec/frame depending on Gaussian count |
 | Training speed | 15–40 min (GPU) | Hours on CPU |
@@ -1848,7 +1854,7 @@ This project is best presented as an end-to-end engineering system, not only as 
 | Deep learning / optimization | PyTorch training loop, differentiable rendering, loss functions, checkpointing |
 | Systems engineering | Pipeline orchestration, configuration, scene normalization, Colab handoff, artifact management |
 | Product thinking | Zero-install browser viewer, Streamlit upload workflow, training preview saves |
-| Engineering judgement | Hardware fallback strategy, gsplat vs software renderer, export safety clamping, reproducible config-driven design |
+| Engineering judgement | Hardware fallback strategy, GraphDECO vs software renderer, export safety clamping, reproducible config-driven design |
 
 ### Suggested Demo Flow
 
@@ -1863,7 +1869,7 @@ This project is best presented as an end-to-end engineering system, not only as 
 
 - The project turns a normal single-camera video into an interactive 3D scene.
 - COLMAP provides real camera geometry; scene normalization maps it to a consistent scale; Gaussian Splatting turns that normalized geometry into a photorealistic representation.
-- gsplat is preferred for CUDA acceleration, while the software renderer keeps the system understandable and debuggable.
+- The GraphDECO rasterizer is the production training backend; the software renderer keeps the system understandable and debuggable without requiring a CUDA build.
 - Training previews make the optimization process visible — you can watch geometry form across 500-iteration intervals rather than waiting for training to complete.
 - Export safety clamping ensures the `.splat` file is clean regardless of any numerical edge cases during training.
 - The architecture separates source-of-truth repository code from temporary runtime environments such as Colab.
@@ -1881,6 +1887,53 @@ This project is best presented as an end-to-end engineering system, not only as 
 - Model compression (fewer Gaussians, same perceptual quality)
 - Automatic CUDA environment validation on startup
 - Monocular depth prior integration for normalization in single-image or sparse-view captures
+
+
+---
+
+## Rendering Backend
+
+MonoSplat originally used **gsplat** (nerfstudio-project) for Gaussian rendering.
+
+The project now uses the official **GraphDECO** rendering stack:
+
+- `diff-gaussian-rasterization` — the CUDA differentiable rasterizer from the 3DGS paper authors
+- `simple-knn` — the CUDA K-nearest-neighbour library for Gaussian initialization
+- GraphDECO `GaussianModel` API compatibility
+
+This provides direct compatibility with the reference implementation from the original Gaussian Splatting paper and ensures MonoSplat's training behaviour matches the published benchmarks exactly.
+
+---
+
+## Project Contributions
+
+MonoSplat extends the official GraphDECO Gaussian Splatting implementation with:
+
+- Automated video-to-dataset conversion via FFmpeg
+- Multi-stage frame quality assessment (blur, exposure, motion, resolution)
+- Intelligent frame selection and filtering before COLMAP
+- Four-tier adaptive COLMAP automation with registration diagnostics
+- Scene normalization — camera positions mapped to the unit ball before training
+- Google Colab-based GPU training with Drive persistence and auto-checkpointing
+- Training preview saves every 500 iterations for visual convergence tracking
+- Evaluation pipeline with PSNR, SSIM, LPIPS, and Tanks & Temples F-score
+- FastAPI backend + React frontend for end-to-end browser workflow
+- Export safety clamping for clean `.ply` / `.splat` delivery
+
+---
+
+## Acknowledgements
+
+This project builds upon the official Gaussian Splatting implementation developed by the GraphDECO research group at Inria.
+
+**Paper:** 3D Gaussian Splatting for Real-Time Radiance Field Rendering — Kerbl et al., SIGGRAPH 2023
+https://repo-sam.inria.fr/fungraph/3d-gaussian-splatting/
+
+**Repository:** https://github.com/graphdeco-inria/gaussian-splatting
+
+**diff-gaussian-rasterization:** https://github.com/graphdeco-inria/diff-gaussian-rasterization
+
+**simple-knn:** https://github.com/camenduru/simple-knn
 
 ---
 
@@ -1900,28 +1953,12 @@ This project is best presented as an end-to-end engineering system, not only as 
   Used for efficient Gaussian neighborhood computation and acceleration.
   https://github.com/camenduru/simple-knn
 
-* **gsplat — Gaussian Splatting Library** — nerfstudio-project
+* **gsplat — Gaussian Splatting Library** — nerfstudio-project (former rendering backend; project now uses GraphDECO)
   https://github.com/nerfstudio-project/gsplat
 
 * **COLMAP — Structure-from-Motion and Multi-View Stereo**
   Used for sparse camera pose estimation and scene reconstruction.
   https://colmap.github.io/
-
-* **Nerfstudio** — Neural Radiance Field Framework
-  Referenced for scene normalization, dataset processing, and camera transformation strategies.
-  https://github.com/nerfstudio-project/nerfstudio
-
-* **MonoGS — Monocular Gaussian Splatting SLAM**
-  Referenced for monocular reconstruction pipeline concepts and camera tracking ideas.
-  https://github.com/muskie82/MonoGS
-
-* **Splat-SLAM** — Google Research
-  Referenced for Gaussian-based SLAM and monocular scene optimization concepts.
-  https://github.com/google-research/Splat-SLAM
-
-* **gaussian-splats-3d — Three.js Gaussian Splat Viewer** — mkkellogg
-  Browser-based Gaussian Splat visualization using Three.js.
-  https://github.com/mkkellogg/GaussianSplats3D
 
 * **SuperSplat — Browser-based Splat Viewer and Editor**
   Used for validation and visualization of exported `.splat` scenes.
