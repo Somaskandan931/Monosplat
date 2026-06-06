@@ -557,6 +557,25 @@ class Trainer:
             self.model._prune_points(prune_mask, self.optimizer)
             return
 
+        # ── Gradient accumulation diagnostic ─────────────────────────────────
+        # [DENSIFY-FIX-4] Log actual grad magnitudes every densify step so we
+        # can tell immediately if xyz_gradient_accum is working at all.
+        # If grad_accum max is 0.000000 across many steps → absgrad flow is
+        # broken (renderer not writing absgrad, or meta["gaussian_ids"] wrong).
+        with torch.no_grad():
+            if hasattr(self.model, "xyz_gradient_accum") and hasattr(self.model, "denom"):
+                _grads_diag = self.model.xyz_gradient_accum / self.model.denom.clamp_min(1)
+                _grads_diag[_grads_diag.isnan()] = 0.0
+                _n_eligible = int((_grads_diag.squeeze(-1) >= grad_thresh).sum().item())
+                log.info(
+                    "[DENSIFY-DIAG] grad_accum  max=%.6f  mean=%.6f  "
+                    "n_eligible=%d  threshold=%.6f",
+                    _grads_diag.max().item(),
+                    _grads_diag.mean().item(),
+                    _n_eligible,
+                    grad_thresh,
+                )
+
         # ── Opacity debug visibility ──────────────────────────────────────────
         # Shows distribution before each densify step — useful for diagnosing
         # collapse (mean near 0) or saturation (mean near 1).
@@ -592,18 +611,37 @@ class Trainer:
         # magnitude per visible Gaussian is lower (signal shared across more
         # primitives). A tighter threshold ensures enough clone/split events
         # happen per densification step to build coverage.
+        # [DENSIFY-FIX-1] grad_thresh lowered 5–7× vs previous values.
+        # Root cause of delta=+0: thresholds were tuned for un-normalised scenes
+        # where cameras_extent >> 1.  After normalize_scene (extent≈1.0), each
+        # of 150k Gaussians contributes a tiny per-step gradient — well below
+        # 0.0001.  Lowering to 0.00003 / 0.00005 matches per-Gaussian signal at
+        # this density.  The diagnostic log ([DENSIFY-DIAG]) will confirm if
+        # gradients actually accumulate at the new thresholds.
+        #
+        # [DENSIFY-FIX-2] Stage 3 delayed from iter≥6000 → iter≥15000.
+        # Stage 3 activates max_screen_size (big_vs) pruning.  In a normalised
+        # scene, Gaussian screen-radius ≈ fx*scale/dist ≈ 1000*0.11/1.0 = 110px,
+        # far above the 20px threshold.  Enabling big_vs before densification has
+        # split large Gaussians into smaller ones guarantees catastrophic collapse
+        # (delta=-140k observed at iter 6000 in training log).
+        #
+        # [DENSIFY-FIX-3] max_screen=0 in Stage 3 (big_vs permanently disabled).
+        # The world-space counterpart (big_ws, 0.5*extent threshold) already
+        # handles oversized Gaussians.  big_vs is redundant and dangerous for
+        # normalised scenes at high resolution.
         if iteration < 2000:
             min_opacity = 0.0       # no opacity pruning in stabilization stage
-            grad_thresh = 0.00015   # [BLUR-FIX-6] was 0.0002 — more aggressive early cloning
+            grad_thresh = 0.00003   # [DENSIFY-FIX-1] was 0.00015 — normalized scene needs tighter thresh
             max_screen  = 0         # no screen-size pruning yet
-        elif iteration < 6000:
+        elif iteration < 15000:     # [DENSIFY-FIX-2] Stage 3 delayed: was 6000 → 15000
             min_opacity = 0.0001    # very gentle floor
-            grad_thresh = 0.0002
-            max_screen  = 0
+            grad_thresh = 0.00005   # [DENSIFY-FIX-1] was 0.0002
+            max_screen  = 0         # no screen-size pruning until densification has run
         else:
             min_opacity = 0.0005    # standard-ish floor
-            grad_thresh = 0.0003
-            max_screen  = 20 if iteration > (self.densify_from_iter + 1000) else 0
+            grad_thresh = 0.0001    # [DENSIFY-FIX-1] was 0.0003
+            max_screen  = 0         # [DENSIFY-FIX-3] big_vs disabled — use big_ws only
 
         before = self.model.get_xyz.shape[0]
 
