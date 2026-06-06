@@ -9,6 +9,12 @@ scipy>=1.10.0
 plyfile>=0.8.1
 lpips>=0.1.4
 
-# gsplat requires CUDA compilation — install separately in the notebook
-# with the correct CUDA version flag, NOT via requirements.txt:
-#   !pip install gsplat --extra-index-url https://docs.gsplat.studio/whl/pt24cu121
+# diff-gaussian-rasterization and simple-knn are installed via submodule in
+# the Colab notebook — NOT via pip from PyPI. The notebook clones
+# graphdeco-inria/gaussian-splatting and runs:
+#
+#   !pip install submodules/diff-gaussian-rasterization
+#   !pip install submodules/simple-knn
+#
+# gsplat has been REMOVED — this project now uses diff-gaussian-rasterization
+# (the original 3DGS CUDA kernel) for reliable gradient flow and densification.

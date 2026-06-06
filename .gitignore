@@ -162,3 +162,5 @@ dense/
 
 .DS_Store
 Thumbs.db
+
+gaussian-splatting/
