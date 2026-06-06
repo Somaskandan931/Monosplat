@@ -1,19 +1,16 @@
 // src/components/layout/Sidebar.tsx
 import { NavLink } from 'react-router-dom'
 import {
-  LayoutDashboard, Database, Cpu, FlaskConical,
-  FileText, Box, ChevronLeft, ChevronRight, Atom,
+  LayoutDashboard, Database, Box,
+  ChevronLeft, ChevronRight, Atom,
 } from 'lucide-react'
 import clsx from 'clsx'
 import { useAppStore } from '@/store/appStore'
 
 const NAV = [
-  { to: '/',          icon: LayoutDashboard, label: 'Dashboard'       },
-  { to: '/datasets',  icon: Database,        label: 'Dataset Manager'  },
-  { to: '/training',  icon: Cpu,             label: 'Training'         },
-  { to: '/experiments', icon: FlaskConical,  label: 'Experiments'      },
-  { to: '/reports',   icon: FileText,        label: 'Reports'          },
-  { to: '/viewer',    icon: Box,             label: '3D Viewer'        },
+  { to: '/',         icon: LayoutDashboard, label: 'Dashboard'      },
+  { to: '/datasets', icon: Database,        label: 'Dataset Manager' },
+  { to: '/viewer',   icon: Box,             label: '3D Viewer'       },
 ]
 
 export function Sidebar() {
