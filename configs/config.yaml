@@ -73,21 +73,20 @@
 #   [COLLAPSE-FIX-4] trainer._maybe_densify: 3-stage logic + opacity debug + safety guard.
 
 training:
-  iterations: 30000           # raised 20000→30000: more steps needed for 150k fixed Gaussians
+  iterations: 30000
 
-  # NO-DENSIFY MODE — all densification and pruning is permanently disabled.
-  # These values are kept for reference only; trainer.py ignores them entirely.
-  densify_from_iter: 999999
-  densify_until_iter: 0
+  # DENSIFICATION ENABLED — standard 3DGS clone/split/prune pipeline.
+  # Start with 50k init points, grow to max_gaussians via densification.
+  densify_from_iter: 500
+  densify_until_iter: 15000
   densification_interval: 200
   densify_grad_threshold: 0.0002
 
-  # Match max_gaussians to MAX_INIT_GAUSSIANS in colab/train.py (150000).
-  # With no densification the count never grows, so this cap is never hit —
-  # but renderer.max_gaussians must match to export all Gaussians correctly.
-  max_gaussians: 150000
+  # Max cap after densification. Starting small (50k init → grow to 200k)
+  # produces better structure than starting with 150k fixed Gaussians.
+  max_gaussians: 200000
 
-  opacity_reset_interval: 3000  # unused in no-densify mode — kept for reference
+  opacity_reset_interval: 3000
 
   lambda_opacity_reg: 0.001
   lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
@@ -115,8 +114,7 @@ model:
 renderer:
   # Must equal training.max_gaussians — a lower value here silently caps the
   # Gaussian count in the exported .ply / .splat.
-  # Set to 150000 to match MAX_INIT_GAUSSIANS and training.max_gaussians.
-  max_gaussians: 150000
+  max_gaussians: 200000
 
 pipeline:
   convert_SHs_python: false

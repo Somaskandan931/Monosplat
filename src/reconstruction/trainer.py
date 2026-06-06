@@ -137,9 +137,7 @@ class Trainer:
             else:
                 loss.backward()
 
-            # NO-DENSIFY: gradient accumulation only feeds _maybe_densify decisions.
-            # Skipped entirely since densification is disabled.
-            # self._update_gradient_accum(render_pkg)
+            self._update_gradient_accum(render_pkg)
 
             if self.scaler is not None:
                 self.scaler.step(self.optimizer)
@@ -155,15 +153,11 @@ class Trainer:
             if iteration % 250 == 0:
                 self._save_preview(iteration)
 
-            # NO-DENSIFY: all clone/split/prune operations are disabled.
-            # The Gaussian count stays fixed at init for the entire training run.
-            # self._maybe_densify(iteration)
+            self._maybe_densify(iteration)
 
-            # NO-OPACITY-RESET: opacity resets are coupled to densification —
-            # resetting opacities without pruning/regrowing just kills valid Gaussians.
-            # if iteration % self.opacity_reset_interval == 0:
-            #     if hasattr(self.model, "reset_opacity"):
-            #         self.model.reset_opacity()
+            if iteration % self.opacity_reset_interval == 0:
+                if hasattr(self.model, "reset_opacity"):
+                    self.model.reset_opacity()
 
             # FIX-G: SH degree schedule — activate one band every 1000 iters
             if iteration % 1000 == 0:
@@ -476,9 +470,6 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _maybe_densify(self, iteration: int) -> None:
-        # NO-DENSIFY: hard disabled. Call site is also commented out.
-        # Remove this return AND un-comment the call site to re-enable.
-        return
         if not self.enable_densification:
             return
         if iteration < self.densify_from_iter:

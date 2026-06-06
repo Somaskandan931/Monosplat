@@ -94,10 +94,9 @@ logging.basicConfig(
 )
 
 # ── Safety constants ──────────────────────────────────────────────────────────
-# Raised 75k → 150k.  More COLMAP points + denser frames means the initial
-# cloud is larger; 150k Gaussians stays within T4 (15 GB) VRAM budget.
-# Lower to 75000 only if you hit OOM.
-MAX_INIT_GAUSSIANS: int = 150_000
+# 50k init points — densification grows the cloud from here up to max_gaussians.
+# Starting smaller produces better structure than a fixed large initialisation.
+MAX_INIT_GAUSSIANS: int = 50_000
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
