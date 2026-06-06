@@ -114,9 +114,22 @@ class Trainer:
 
             self.optimizer.zero_grad(set_to_none=True)
 
+            # Render OUTSIDE autocast — means2d must stay fp32 so that gsplat's
+            # absgrad hook attaches to the correct tensor node.  Inside autocast,
+            # means2d is cast to fp16 and absgrad ends up on the fp16 copy, which
+            # getattr(means2d, "absgrad") cannot find → grad_sparse = zeros →
+            # xyz_gradient_accum never grows → delta=+0 every densification step.
+            render_pkg = self._render(viewpoint)
+
+            # Retain grad on means2d as a fallback for non-absgrad gsplat builds
+            meta = render_pkg.get("meta")
+            if meta is not None:
+                means2d = meta.get("means2d")
+                if means2d is not None and means2d.requires_grad:
+                    means2d.retain_grad()
+
             with torch.amp.autocast(device):
-                render_pkg = self._render(viewpoint)
-                loss       = self._compute_loss(render_pkg, viewpoint)
+                loss = self._compute_loss(render_pkg, viewpoint)
 
             if not torch.isfinite(loss):
                 self.nan_counter += 1
@@ -137,6 +150,26 @@ class Trainer:
                 self.scaler.scale(loss).backward()
             else:
                 loss.backward()
+
+            # Fix: unscale means2d.absgrad before reading it in _update_gradient_accum.
+            # scaler.scale(loss).backward() inflates ALL gradients (including absgrad)
+            # by the scaler factor (typically 65536).  We must undo that scaling before
+            # accumulating into xyz_gradient_accum, otherwise the grad threshold
+            # (0.0002) is never meaningfully compared against inflated values — the
+            # accumulator grows but comparison semantics are wrong.
+            # scaler.unscale_(optimizer) only unscales optimizer-tracked params, NOT
+            # intermediate tensors like means2d, so we do it manually here.
+            if self.scaler is not None:
+                inv_scale = 1.0 / (self.scaler.get_scale() + 1e-8)
+                meta = render_pkg.get("meta")
+                if meta is not None:
+                    means2d = meta.get("means2d")
+                    if means2d is not None:
+                        ab = getattr(means2d, "absgrad", None)
+                        if ab is not None:
+                            means2d.absgrad = ab * inv_scale
+                        elif means2d.grad is not None:
+                            means2d.grad.mul_(inv_scale)
 
             self._update_gradient_accum(render_pkg)
 
