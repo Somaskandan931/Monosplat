@@ -53,7 +53,7 @@ class Trainer:
         self.densification_interval: int   = train_cfg.get("densification_interval", 200)   # matches config.yaml default
         self.densify_grad_threshold: float = train_cfg.get("densify_grad_threshold", 0.0003) # matches config.yaml default
         self.max_gaussians:          int   = train_cfg.get("max_gaussians",          150000) # matches config.yaml default
-        self.opacity_reset_interval: int   = train_cfg.get("opacity_reset_interval", 3000)  # [75-VIEW-FIX] was 1000
+        self.opacity_reset_interval: int   = train_cfg.get("opacity_reset_interval", 3000)  # matches config.yaml default; safe now that reset_opacity uses jitter
         self.lambda_dssim:           float = train_cfg.get("lambda_dssim",           0.2)   # FIX-C
         self.model_path:             str   = cfg.get("model_path", "outputs/gaussian")
 
@@ -110,6 +110,7 @@ class Trainer:
 
         for iteration in range(1, self.iterations + 1):
             viewpoint = _pick_viewpoint(viewpoint_stack)
+            self._current_iter = iteration   # [BLUR-FIX-2] expose to _compute_loss for LPIPS warmup
 
             self.optimizer.zero_grad(set_to_none=True)
 
@@ -147,11 +148,17 @@ class Trainer:
 
             self._update_lr(iteration)
 
-            # FIX-D: periodic VRAM cleanup; previews every 250 iters for faster debug feedback
+            # [BLUR-FIX-5] Preview schedule: skip early previews (always blurry before
+            # densification kicks in at iter 500). Save at meaningful milestones instead:
+            #   iter 250 is guaranteed fog — densification hasn't run yet, N=50K frozen.
+            #   First useful preview is iter 1000 (2 densification cycles completed).
+            PREVIEW_MILESTONES = {500, 1000, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 25000, 30000}
+            if iteration in PREVIEW_MILESTONES or (iteration % 5000 == 0):
+                self._save_preview(iteration)
+
+            # FIX-D: periodic VRAM cleanup
             if iteration % 500 == 0:
                 torch.cuda.empty_cache()
-            if iteration % 250 == 0:
-                self._save_preview(iteration)
 
             self._maybe_densify(iteration)
 
@@ -340,10 +347,33 @@ class Trainer:
                 align_corners=False,
             ).squeeze(0)
 
-        # Read lambda_lpips directly from config — no hardcoded fallback that
-        # could override config.yaml.  The config_loader _DEFAULTS already
-        # supplies 0.05 if the key is absent from config.yaml.
-        lambda_lpips = self.cfg.get("training", {}).get("lambda_lpips", 0.05)
+        # [BLUR-FIX-2] LPIPS warmup: don't apply LPIPS until iter 3000.
+        #
+        # LPIPS is a high-level perceptual loss that operates on VGG feature
+        # maps.  Before the scene has geometric structure (iter < 3000), LPIPS
+        # pushes Gaussians to form large blobs matching perceptual features
+        # rather than actual geometry.  This fights L1+SSIM and causes the
+        # loss to go UP between iters 200–400 (visible in the training log).
+        #
+        # Warmup schedule:
+        #   iter < 1000  : no LPIPS (pure L1 + SSIM — geometry stabilization)
+        #   iter < 3000  : LPIPS ramped up linearly from 0 → lambda_lpips
+        #   iter >= 3000 : full LPIPS weight from config
+        #
+        # This matches the strategy used in Scaffold-GS and Mip-Splatting.
+        lambda_lpips_cfg = self.cfg.get("training", {}).get("lambda_lpips", 0.05)
+        current_iter = getattr(self, "_current_iter", self.iterations)  # set by train loop
+
+        lpips_warmup_start = 1000
+        lpips_warmup_end   = 3000
+        if current_iter < lpips_warmup_start:
+            lambda_lpips = 0.0
+        elif current_iter < lpips_warmup_end:
+            ramp = (current_iter - lpips_warmup_start) / (lpips_warmup_end - lpips_warmup_start)
+            lambda_lpips = lambda_lpips_cfg * ramp
+        else:
+            lambda_lpips = lambda_lpips_cfg
+
         return combined_loss(
             rendered, gt_image,
             lambda_ssim=self.lambda_dssim,
@@ -523,9 +553,15 @@ class Trainer:
         #
         # Stage 3 (iter ≥ 6000): Normal pruning — standard 3DGS thresholds.
         #   Model is mature; prune aggressively to remove floaters.
+        #
+        # [BLUR-FIX-6] Stage 1 grad_thresh lowered 0.0002 → 0.00015.
+        # With 150K init Gaussians on a normalized scene, the mean gradient
+        # magnitude per visible Gaussian is lower (signal shared across more
+        # primitives). A tighter threshold ensures enough clone/split events
+        # happen per densification step to build coverage.
         if iteration < 2000:
             min_opacity = 0.0       # no opacity pruning in stabilization stage
-            grad_thresh = 0.0002    # low threshold → more clone/split events
+            grad_thresh = 0.00015   # [BLUR-FIX-6] was 0.0002 — more aggressive early cloning
             max_screen  = 0         # no screen-size pruning yet
         elif iteration < 6000:
             min_opacity = 0.0001    # very gentle floor

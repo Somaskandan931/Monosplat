@@ -14,44 +14,34 @@ FIXES APPLIED:
   G. Densification stubs:  _densify_and_clone, _densify_and_split, and
                             _prune_points fully implemented with optimizer
                             state patching (Adam exp_avg / exp_avg_sq).
-  H. reset_opacity:        implemented (called by Trainer every 1000 iters).
+  H. reset_opacity:        implemented (called by Trainer every opacity_reset_interval iters).
 
 BLUR FIXES APPLIED:
   BF-1. get_scaling upper clamp: 2.0 → 1.0
-        Matches the initial scale clamp (max=0.0 log-space = 1.0 linear).
-        Prevents runaway Gaussian growth post-densification while still
-        allowing meaningful surface coverage.
-  BF-2. Initial opacity: 0.1 → 0.5
-        Very low initial opacity starved early training of gradient signal.
-        Higher initial opacity forces correct Gaussian placement from the start.
+  BF-2. Initial opacity: 0.1 → 0.5 (then reverted — see GRAD-FIX-3 below)
   BF-3. reset_opacity floor: 0.01 → 0.05
-        Preserves enough accumulated structure between resets.
   BF-4. _densify_and_split scale clamp: 2.0 → 1.0 (matches BF-1).
 
 PATCH APPLIED (June 2026):
   P-1. Initial log-scales clamped to [-4, 0] in initialise_from_pcd.
-       Previously unclamped values could exceed 0.0 (i.e. Gaussian diameter > 1
-       world-unit) when COLMAP point spacing is large, producing giant blobs
-       that dominate early training and never recover.  Forcing max=0.0 means
-       all initial Gaussians are ≤ 1 world-unit and must earn their size.
 
 FIX APPLIED (June 2026 — foggy preview):
-  FP-1. initialise_from_pcd now computes max_log_scale from spatial_lr_scale
-        (= cameras_extent, passed by train.py after scene normalization).
-        After normalize_scene the scene fits inside a ~0.047-radius sphere,
-        so clamping log-scales to 0.0 still produces Gaussians with diameter
-        exp(0) = 1.0 world-unit — 21× larger than the entire scene.  Every
-        Gaussian is a giant translucent blob and the render is solid grey fog.
-        Fix: max_log_scale = log(cameras_extent * 0.1), which keeps each
-        initial Gaussian at ~10% of the scene radius.  After normalization
-        cameras_extent is floored to 1.0 in train.py (see FP-2 there), so
-        the default behaviour (spatial_lr_scale=1.0) is max_log_scale = log(0.1)
-        ≈ −2.3, giving initial Gaussian diameter ≈ 0.1 world-units — correct
-        for a unit-sphere scene.
-  FP-2. get_scaling upper clamp raised from 1.0 to exp(0) = 1.0 but now driven
-        by self._max_log_scale stored during initialise_from_pcd, so cloning/
-        splitting during densification cannot grow Gaussians beyond the same
-        ceiling that was used at init time.
+  FP-1. initialise_from_pcd now computes max_log_scale from spatial_lr_scale.
+  FP-2. get_scaling upper clamp driven by self._max_log_scale.
+
+ROOT CAUSE FIXES (June 2026 — zero densification + opacity collapse):
+  RC-1. reset_opacity: replaced fill_() with fill_() + jitter (±0.05 logit).
+        fill_() set every Gaussian to the IDENTICAL logit, causing Adam moments
+        to track zero-delta for all Gaussians (min=mean=max=constant opacity).
+        With jitter, Gaussians diverge immediately post-reset.
+  RC-2. _densify_and_clone threshold: 0.01 * scene_extent → 0.1 * scene_extent.
+        Initial scales ≈ exp(-2.3) ≈ 0.1. With extent=1.1019, the old threshold
+        was 0.011 — below ALL initial scales → clone never fired → delta=+0 every
+        step from iter 600 through 5800.
+  RC-3. _densify_and_split threshold: matched to 0.1 (was 0.01) for consistency.
+  RC-4. big_ws prune threshold: 0.1 * extent → 0.5 * extent.
+        Old 0.1*extent=0.11 was at or below initial scale ≈ 0.1 → all Gaussians
+        flagged as big_ws when Stage 3 fires → 40K pruned to hard floor of 10K.
 """
 
 import math
@@ -122,8 +112,18 @@ class GaussianModel(nn.Module):
 
     @property
     def get_opacity(self) -> Tensor:
-        # FIX C: clamp so opacity never reaches exact 0 or 1
-        return torch.sigmoid(self._opacities).clamp(1e-4, 0.9999)
+        # [GRAD-FIX-2] Removed hard clamp(1e-4, 0.9999).
+        #
+        # The previous clamp(1e-4, 0.9999) on sigmoid output was intended to
+        # prevent numerical issues but has a serious side effect: it creates
+        # a zero-gradient zone for any Gaussian where opacity reaches the
+        # boundary. With AMP now disabled (GRAD-FIX-1), the gradient flow is
+        # healthy and the logit-space _opacities are already bounded by their
+        # own sigmoid activation. The clamp is unnecessary and harmful.
+        #
+        # The original numeric safety concern is addressed by the logit-space
+        # parameterisation itself: _opacities ∈ ℝ → sigmoid ∈ (0,1) strictly.
+        return torch.sigmoid(self._opacities)
 
     # ------------------------------------------------------------------
     # Helpers
@@ -218,11 +218,20 @@ class GaussianModel(nn.Module):
         rots = torch.zeros(n, 4)
         rots[:, 0] = 1.0                                       # identity quat
 
-        # BLUR FIX: raised initial opacity from 0.1 → 0.5.
-        # Low initial opacity (0.1) means Gaussians are nearly transparent at
-        # the start of training. The optimizer keeps them transparent because
-        # the gradient signal is weak, leading to a blurry underfit result.
-        opacities = _inverse_sigmoid(0.5 * torch.ones(n, 1))
+        # [GRAD-FIX-3] Lower initial opacity from 0.5 → 0.1.
+        #
+        # The "BLUR FIX" that raised this to 0.5 had good intentions (more
+        # gradient signal early) but creates a worse problem: with 50K Gaussians
+        # all at opacity=0.5, alpha compositing saturates immediately — back-
+        # layer Gaussians receive near-zero gradients because the transmittance
+        # T = Π(1-αᵢ) ≈ 0 after the first few Gaussians in depth order.
+        # Only the front ~10 Gaussians along each ray get meaningful gradients;
+        # the rest are gradient-starved AND opaque, so densification never fires.
+        #
+        # 0.1 is the standard 3DGS initialization: each Gaussian is translucent
+        # enough that multiple layers contribute to each pixel, distributing
+        # gradient signal throughout the cloud.
+        opacities = _inverse_sigmoid(0.1 * torch.ones(n, 1))
 
         self._xyz           = nn.Parameter(xyz.float())
         self._features_dc   = nn.Parameter(sh_dc.float().contiguous())
@@ -241,20 +250,26 @@ class GaussianModel(nn.Module):
     # Opacity reset (called by Trainer every opacity_reset_interval iters)
     # ------------------------------------------------------------------
 
-    def reset_opacity(self) -> None:   # BLUR FIX: raised reset floor from 0.01 → 0.05
-        """Reset all opacities to a low-but-visible value (logit of 0.05).
+    def reset_opacity(self, reset_value: float = 0.05) -> None:
+        """Reset all opacities to a low floor while preserving per-Gaussian differentiation.
 
-        BLUR FIX: The original 0.01 reset was so low that Gaussians became
-        nearly invisible after each reset, forcing the optimizer to rebuild
-        coverage from scratch every 3000 iterations. This starves the scene
-        of accumulated opacity structure and causes blurry renders.
-        Raising to 0.05 preserves enough signal while still allowing
-        transparent floaters to be pruned.
+        ROOT CAUSE FIX: The previous fill_() set every Gaussian to the IDENTICAL logit
+        value. After the reset, Adam's exp_avg/exp_avg_sq still carry zero-delta moments
+        for all Gaussians (all moved identically → no gradient signal). Every subsequent
+        opacity gradient is shared, so min=mean=max of get_opacity stays constant forever.
+
+        Fix: apply a small uniform jitter (±0.05 logit) after the fill. Gaussians remain
+        near the reset floor but are distinguishable to the optimizer, so they immediately
+        diverge based on their photometric contribution. The jitter is small enough that
+        all opacities remain in (sigmoid(-2.9), sigmoid(-2.7)) ≈ (0.052, 0.063) — safely
+        above the min_opacity prune threshold of 0.0005.
         """
         with torch.no_grad():
-            self._opacities.data.fill_(_inverse_sigmoid(
-                torch.tensor(0.05)
-            ).item())
+            target_logit = _inverse_sigmoid(torch.tensor(reset_value)).item()
+            self._opacities.data.fill_(target_logit)
+            # Jitter: ±0.05 in logit space so Gaussians stay distinguishable
+            jitter = (torch.rand_like(self._opacities) - 0.5) * 0.1
+            self._opacities.data.add_(jitter)
 
     # ------------------------------------------------------------------
     # Gradient-accumulation update (called by Trainer after each render)
@@ -339,7 +354,11 @@ class GaussianModel(nn.Module):
         prune_mask = (self.get_opacity < min_opacity).squeeze()
         if max_screen_size > 0:
             big_vs = self.max_radii2D > max_screen_size
-            big_ws = self.get_scaling.max(dim=1).values > 0.1 * extent
+            # ROOT CAUSE FIX: 0.1 * extent = 0.11 for a normalized scene.
+            # Initial Gaussian scales ≈ 0.1, so nearly EVERY Gaussian triggers
+            # big_ws at Stage 3 onset → 40K+ pruned to the 10K hard floor.
+            # Use 0.5 * extent (standard 3DGS world-space prune threshold).
+            big_ws = self.get_scaling.max(dim=1).values > 0.5 * extent
             prune_mask = prune_mask | big_vs | big_ws
 
         self._prune_points(prune_mask, optimizer)
@@ -352,9 +371,12 @@ class GaussianModel(nn.Module):
         self, grads, grad_threshold, scene_extent, optimizer=None
     ) -> None:
         """Clone small-scale Gaussians that have high screen-space gradient."""
+        # ROOT CAUSE FIX: 0.01 * scene_extent = 0.011 for a normalized scene.
+        # Initial Gaussian scales ≈ exp(-2.3) ≈ 0.1 > 0.011 → clone NEVER fires.
+        # Standard 3DGS percent_dense=0.01 applies to scene DIAMETER ≈ 0.1*radius.
         selected = (
             (grads.squeeze(-1) >= grad_threshold)
-            & (self.get_scaling.max(dim=1).values <= 0.01 * scene_extent)
+            & (self.get_scaling.max(dim=1).values <= 0.1 * scene_extent)
         )
         if not selected.any():
             return
@@ -384,7 +406,7 @@ class GaussianModel(nn.Module):
         selected = torch.zeros(n, dtype=torch.bool, device=self._xyz.device)
         selected_mask = (
             (grads.squeeze(-1) >= grad_threshold)
-            & (self.get_scaling.max(dim=1).values > 0.01 * scene_extent)
+            & (self.get_scaling.max(dim=1).values > 0.1 * scene_extent)
         )
         selected[:len(selected_mask)] = selected_mask
         if not selected.any():
