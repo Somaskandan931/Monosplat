@@ -1,12 +1,12 @@
 /// <reference types="vite/client" />
-// src/pages/Viewer.tsx — fix PLYLoader import path and implicit any types
+// src/pages/Viewer.tsx
 import { Suspense, useRef, useState, useEffect } from 'react'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { OrbitControls, Grid, Stats } from '@react-three/drei'
-import { Box as BoxIcon, RotateCcw, Settings, Maximize2, Link } from 'lucide-react'
+import { RotateCcw, Settings, Maximize2, Link } from 'lucide-react'
 import * as THREE from 'three'
 import { TopBar } from '@/components/layout/TopBar'
-import { Card, CardBody, Button, SectionHeading, Spinner, StatusBadge } from '@/components/ui'
+import { Button, SectionHeading, Spinner } from '@/components/ui'
 import { useAppStore } from '@/store/appStore'
 import { api } from '@/api/client'
 import type { ResultsResponse } from '@/types/api'
@@ -45,7 +45,7 @@ function PlyCloud({ url }: { url: string }) {
   const ref = useRef<THREE.Points>(null)
   const [geo, setGeo] = useState<THREE.BufferGeometry | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [_loading, setLoading] = useState(true)
 
   useEffect(() => {
     setGeo(null)
@@ -105,7 +105,6 @@ export default function Viewer() {
   const [jobIdInput, setJobIdInput] = useState(activeJobId ?? '')
   const [results, setResults]       = useState<ResultsResponse | null>(null)
   const [loading, setLoading]       = useState(false)
-  const [plyLoading, setPlyLoading] = useState(false)
   const [error, setError]           = useState<string | null>(null)
   const [showStats, setShowStats]   = useState(false)
   const [resetKey, setResetKey]     = useState(0)

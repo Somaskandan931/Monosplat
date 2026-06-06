@@ -4,7 +4,6 @@ import { TopBar } from '@/components/layout/TopBar'
 import { StatCard, Card, CardHeader, CardBody, StatusBadge, SectionHeading, EmptyState, Spinner } from '@/components/ui'
 import { useProjects } from '@/api/hooks/useProjects'
 import { useRuns } from '@/api/hooks/useRuns'
-import { MetricsChart } from '@/components/charts/MetricsChart'
 import { formatDistanceToNow } from 'date-fns'
 import { Link } from 'react-router-dom'
 

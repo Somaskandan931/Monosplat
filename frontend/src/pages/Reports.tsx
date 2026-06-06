@@ -1,6 +1,6 @@
 // src/pages/Reports.tsx
 import { useState } from 'react'
-import { FileText, ChevronRight, BarChart2, Clock, Download } from 'lucide-react'
+import { FileText, BarChart2, Clock, Download } from 'lucide-react'
 import { TopBar } from '@/components/layout/TopBar'
 import {
   Card, CardHeader, CardBody, Button, StatusBadge,
@@ -10,7 +10,8 @@ import { useRuns, useReport, useExport } from '@/api/hooks/useRuns'
 import { MetricsChart } from '@/components/charts/MetricsChart'
 import { useMetrics } from '@/api/hooks/useRuns'
 import { formatDistanceToNow, format } from 'date-fns'
-import type { RunRead } from '@/types/api'
+import type { RunRead, ReportResponse } from '@/types/api'
+type ReportDetail = ReportResponse & Partial<RunRead>
 
 function RunReport({ runId }: { runId: string }) {
   const { data: report, isLoading } = useReport(runId, true)
@@ -20,26 +21,27 @@ function RunReport({ runId }: { runId: string }) {
   if (isLoading) return <div className="flex justify-center py-12"><Spinner /></div>
   if (!report) return <p className="text-sm text-dim p-6">Report not found.</p>
 
-  const fm = report.final_metrics as Record<string, number> | undefined
+  const r = report as ReportDetail
+  const fm = r.final_metrics as Record<string, number> | undefined
 
   return (
     <div className="space-y-4 animate-fade-in">
       {/* Header */}
       <div className="flex items-start justify-between">
         <div>
-          <h3 className="font-display font-700 text-white">{report.run_name}</h3>
+          <h3 className="font-display font-700 text-white">{r.run_name}</h3>
           <p className="text-xs font-mono text-dim mt-0.5">
-            {format(new Date(report.created_at), 'PPpp')}
-            {report.finished_at && ` → ${format(new Date(report.finished_at), 'p')}`}
+            {format(new Date(r.created_at), 'PPpp')}
+            {r.finished_at && ` → ${format(new Date(r.finished_at), 'p')}`}
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <StatusBadge status={report.status} />
+          <StatusBadge status={r.status ?? 'pending'} />
           <Button
             size="sm"
             variant="primary"
             onClick={() => exportRun.mutate({ run_id: runId, formats: ['ply', 'splat'] })}
-            disabled={report.status !== 'success'}
+            disabled={r.status !== 'success'}
             loading={exportRun.isPending}
           >
             <Download size={12} /> Export PLY + SPLAT
@@ -76,12 +78,12 @@ function RunReport({ runId }: { runId: string }) {
       )}
 
       {/* Config snapshot */}
-      {report.config_snapshot && (
+      {r.config_snapshot && (
         <Card>
           <CardHeader><SectionHeading>Config Snapshot</SectionHeading></CardHeader>
           <CardBody>
             <pre className="text-xs font-mono text-ghost overflow-x-auto whitespace-pre-wrap">
-              {JSON.stringify(report.config_snapshot, null, 2)}
+              {JSON.stringify(r.config_snapshot, null, 2)}
             </pre>
           </CardBody>
         </Card>
@@ -92,8 +94,8 @@ function RunReport({ runId }: { runId: string }) {
         <CardHeader><SectionHeading>Artifacts</SectionHeading></CardHeader>
         <CardBody className="space-y-2 text-xs font-mono">
           {[
-            { label: 'Dataset', val: report.dataset_path },
-            { label: 'Model',   val: report.model_path   },
+            { label: 'Dataset', val: r.dataset_path },
+            { label: 'Model',   val: r.model_path   },
           ].map(({ label, val }) => (
             <div key={label} className="flex items-center justify-between">
               <span className="text-dim">{label}</span>

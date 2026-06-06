@@ -1,11 +1,11 @@
 // src/pages/Experiments.tsx
 import { useState } from 'react'
-import { FlaskConical, Download, Eye, BarChart2, Filter } from 'lucide-react'
+import { FlaskConical, Download, Eye, Filter } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { TopBar } from '@/components/layout/TopBar'
 import {
-  Card, CardHeader, CardBody, Button, StatusBadge,
-  SectionHeading, EmptyState, Spinner, Badge,
+  Card, CardHeader, Button, StatusBadge,
+  SectionHeading, EmptyState, Spinner,
 } from '@/components/ui'
 import { useRuns, useExport, useMetrics } from '@/api/hooks/useRuns'
 import { useProjects } from '@/api/hooks/useProjects'

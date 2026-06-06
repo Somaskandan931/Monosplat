@@ -80,21 +80,21 @@ export interface MetricPoint {
 export interface MetricsResponse { run_id: string; metrics: MetricPoint[]; count: number }
 
 // GET /report/{run_id}
-// The backend /report/{run_id} endpoint returns the full RunRead shape
-// (merged report + run data). All fields from RunRead are included here
-// so Reports.tsx can access run_name, status, finished_at, etc. directly.
 export interface ReportResponse {
   id: string; project_id: string; report_type: string; title?: string
   summary?: string; payload?: Record<string, unknown>; created_at: string; updated_at: string
   // RunRead fields surfaced by the report endpoint
-  run_name: string
-  status: string
+  run_name?: string
+  status?: string
   finished_at?: string
   final_metrics?: Record<string, unknown>
   config_snapshot?: Record<string, unknown>
   dataset_path?: string
   model_path?: string
 }
+
+// GET /report/{run_id} — alias kept for backward compat
+export type RunReportResponse = ReportResponse
 
 // Runs
 export interface RunRead {
