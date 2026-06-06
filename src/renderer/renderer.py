@@ -239,7 +239,7 @@ class GaussianRenderer:
         shs = model.get_features.to(device)
 
         # ── Rasterize ─────────────────────────────────────────────────────────
-        rendered_image, radii = rasterizer(
+        render_out = rasterizer(
             means3D=means3D,
             means2D=means2D,
             shs=shs,
@@ -249,8 +249,10 @@ class GaussianRenderer:
             rotations=rotations,
             cov3D_precomp=None,
         )
-        # rendered_image: (3, H, W) float32
-        # radii:          (N,) int32 — 0 means not visible
+        # Newer diff-gaussian-rasterization returns (image, radii, depth);
+        # older versions return (image, radii). Unpack safely.
+        rendered_image = render_out[0]   # (3, H, W) float32
+        radii          = render_out[1]   # (N,) int32 — 0 means not visible
 
         meta = {
             "viewspace_points":  means2D,
