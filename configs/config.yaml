@@ -73,22 +73,21 @@
 #   [COLLAPSE-FIX-4] trainer._maybe_densify: 3-stage logic + opacity debug + safety guard.
 
 training:
-  iterations: 20000           # [T&T-3] T4 baseline — notebook overrides for L4/A100
+  iterations: 20000
 
-  # NO-DENSIFY MODE: densify_from_iter > densify_until_iter so the window
-  # never opens.  The trainer.py loop also has _maybe_densify commented out,
-  # so this is belt-and-suspenders.
-  densify_from_iter: 999999      # effectively disables densification
-  densify_until_iter: 0          # window [999999, 0] is empty
+  # NO-DENSIFY MODE — all densification and pruning is permanently disabled.
+  # These values are kept for reference only; trainer.py ignores them entirely.
+  densify_from_iter: 999999
+  densify_until_iter: 0
+  densification_interval: 200
+  densify_grad_threshold: 0.0002
 
-  densification_interval: 200 # [T&T-5] was 500 — more frequent fill for sparse coverage
-  densify_grad_threshold: 0.0002  # [COLLAPSE-FIX] was 0.0005 — lower threshold fires more
-                                  # clone/split events; stage logic in trainer controls pruning
+  # Match max_gaussians to MAX_INIT_GAUSSIANS in colab/train.py (75000).
+  # With no densification the count never grows, so this cap is never hit —
+  # but renderer.max_gaussians must match to export all Gaussians correctly.
+  max_gaussians: 75000
 
-  max_gaussians: 200000       # [T&T-1] was 80000 — T4 T&T baseline
-
-  opacity_reset_interval: 3000  # [75-VIEW-FIX] was 1000 — give Gaussians 3000 iters to
-                                 # establish opacity before the first reset wipes them out
+  opacity_reset_interval: 3000  # unused in no-densify mode — kept for reference
 
   lambda_opacity_reg: 0.001
   lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
@@ -114,10 +113,10 @@ model:
   sh_degree: 3
 
 renderer:
-  # MUST equal training.max_gaussians — a lower value here silently caps the
-  # Gaussian count written to the exported .ply / .splat, making the export
-  # look blurrier than training previews even after a successful run.
-  max_gaussians: 200000       # [T&T-10] synced to training.max_gaussians
+  # Must equal training.max_gaussians — a lower value here silently caps the
+  # Gaussian count in the exported .ply / .splat.
+  # Set to 75000 to match MAX_INIT_GAUSSIANS and training.max_gaussians.
+  max_gaussians: 75000
 
 pipeline:
   convert_SHs_python: false

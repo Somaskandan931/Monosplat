@@ -94,8 +94,11 @@ logging.basicConfig(
 )
 
 # ── Safety constants ──────────────────────────────────────────────────────────
-MAX_INIT_GAUSSIANS: int = 20_000  # Colab-safe: 20k initial Gaussians prevent OOM on T4
-# Raise to 40000 for L4, 60000 for A100 via MONOSPLAT_EXTRA_TRAIN_ARGS env var if needed
+# Raised 20k → 75k.  With no-densify mode the init count IS the final count,
+# so 20k was permanently too sparse — scene underfitted and blurry all the way
+# to iter 20000.  T4 (15 GB) handles 75k Gaussians without OOM.
+# Lower to 40000 only if you hit OOM (e.g. free-tier T4 with other processes).
+MAX_INIT_GAUSSIANS: int = 75_000
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

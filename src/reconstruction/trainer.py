@@ -137,8 +137,8 @@ class Trainer:
             else:
                 loss.backward()
 
-            # NO-DENSIFY MODE: gradient accumulation is only needed for
-            # densification decisions; skip it to save memory and time.
+            # NO-DENSIFY: gradient accumulation only feeds _maybe_densify decisions.
+            # Skipped entirely since densification is disabled.
             # self._update_gradient_accum(render_pkg)
 
             if self.scaler is not None:
@@ -155,12 +155,12 @@ class Trainer:
             if iteration % 250 == 0:
                 self._save_preview(iteration)
 
-            # NO-DENSIFY MODE: densification and pruning are fully disabled.
-            # Gaussians are trained as-is from the initial point cloud — no
-            # clone, no split, no opacity-based prune, no opacity resets.
+            # NO-DENSIFY: all clone/split/prune operations are disabled.
+            # The Gaussian count stays fixed at init for the entire training run.
             # self._maybe_densify(iteration)
 
-            # Opacity resets accompany densification; skipped for consistency.
+            # NO-OPACITY-RESET: opacity resets are coupled to densification —
+            # resetting opacities without pruning/regrowing just kills valid Gaussians.
             # if iteration % self.opacity_reset_interval == 0:
             #     if hasattr(self.model, "reset_opacity"):
             #         self.model.reset_opacity()
@@ -476,10 +476,9 @@ class Trainer:
     # ------------------------------------------------------------------
 
     def _maybe_densify(self, iteration: int) -> None:
-        # NO-DENSIFY MODE: this method is intentionally disabled.
-        # The call site in train() is also commented out.
-        # Remove both comments to re-enable densification.
-        return  # noqa: early-return — no pruning, no cloning, no splitting
+        # NO-DENSIFY: hard disabled. Call site is also commented out.
+        # Remove this return AND un-comment the call site to re-enable.
+        return
         if not self.enable_densification:
             return
         if iteration < self.densify_from_iter:
