@@ -73,7 +73,7 @@
 #   [COLLAPSE-FIX-4] trainer._maybe_densify: 3-stage logic + opacity debug + safety guard.
 
 training:
-  iterations: 20000
+  iterations: 30000           # raised 20000→30000: more steps needed for 150k fixed Gaussians
 
   # NO-DENSIFY MODE — all densification and pruning is permanently disabled.
   # These values are kept for reference only; trainer.py ignores them entirely.
@@ -82,10 +82,10 @@ training:
   densification_interval: 200
   densify_grad_threshold: 0.0002
 
-  # Match max_gaussians to MAX_INIT_GAUSSIANS in colab/train.py (75000).
+  # Match max_gaussians to MAX_INIT_GAUSSIANS in colab/train.py (150000).
   # With no densification the count never grows, so this cap is never hit —
   # but renderer.max_gaussians must match to export all Gaussians correctly.
-  max_gaussians: 75000
+  max_gaussians: 150000
 
   opacity_reset_interval: 3000  # unused in no-densify mode — kept for reference
 
@@ -98,16 +98,16 @@ training:
   position_lr_init: 0.00016
   position_lr_final: 0.0000016
   position_lr_delay_mult: 0.01
-  position_lr_max_steps: 20000  # [T&T-7] synced to new iterations
+  position_lr_max_steps: 30000  # synced to iterations=30000
 
   feature_lr: 0.0025
   opacity_lr: 0.05
   scaling_lr: 0.005
   rotation_lr: 0.001
 
-  save_iterations: [1000, 5000, 10000, 15000, 20000]         # [T&T-8]
-  checkpoint_iterations: [1000, 5000, 10000, 15000, 20000]   # [T&T-8]
-  test_iterations: [10000, 20000]                             # [T&T-8]
+  save_iterations: [1000, 5000, 10000, 20000, 30000]
+  checkpoint_iterations: [1000, 5000, 10000, 20000, 30000]
+  test_iterations: [15000, 30000]
 
 model:
   sh_degree: 3
@@ -115,8 +115,8 @@ model:
 renderer:
   # Must equal training.max_gaussians — a lower value here silently caps the
   # Gaussian count in the exported .ply / .splat.
-  # Set to 75000 to match MAX_INIT_GAUSSIANS and training.max_gaussians.
-  max_gaussians: 75000
+  # Set to 150000 to match MAX_INIT_GAUSSIANS and training.max_gaussians.
+  max_gaussians: 150000
 
 pipeline:
   convert_SHs_python: false
@@ -133,9 +133,9 @@ data:
 colmap:
   quality: medium             # low / medium / high
   binary_path: colmap         # path to colmap binary (or "colmap" if on PATH)
-  # [T&T-11] SIMPLE_RADIAL for official T&T dataset downloads (professional cameras).
-  # Switch to OPENCV if using phone-recorded video of a T&T-style subject.
-  camera_model: SIMPLE_RADIAL
+  # OPENCV for phone-recorded video: handles radial + tangential distortion.
+  # SIMPLE_RADIAL only for professional cameras / official T&T dataset downloads.
+  camera_model: OPENCV
   single_camera: true         # all frames share one lens → single camera model
 
 runtime:

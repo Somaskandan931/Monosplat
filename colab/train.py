@@ -94,11 +94,10 @@ logging.basicConfig(
 )
 
 # ── Safety constants ──────────────────────────────────────────────────────────
-# Raised 20k → 75k.  With no-densify mode the init count IS the final count,
-# so 20k was permanently too sparse — scene underfitted and blurry all the way
-# to iter 20000.  T4 (15 GB) handles 75k Gaussians without OOM.
-# Lower to 40000 only if you hit OOM (e.g. free-tier T4 with other processes).
-MAX_INIT_GAUSSIANS: int = 75_000
+# Raised 75k → 150k.  More COLMAP points + denser frames means the initial
+# cloud is larger; 150k Gaussians stays within T4 (15 GB) VRAM budget.
+# Lower to 75000 only if you hit OOM.
+MAX_INIT_GAUSSIANS: int = 150_000
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

@@ -498,9 +498,9 @@ def filter_low_feature_frames(
 
 def filter_duplicate_viewpoints(
     image_dir: str,
-    ssim_threshold: float = 0.88,  # 0.92→0.88: only remove truly identical viewpoints
-    hist_threshold: float = 0.96,  # 0.98→0.96: slightly stricter histogram gate
-    min_keep_ratio: float = 0.5,
+    ssim_threshold: float = 0.98,  # raised 0.88→0.98: only remove truly identical viewpoints
+    hist_threshold: float = 0.995, # raised 0.96→0.995: keep frames with even slight viewpoint change
+    min_keep_ratio: float = 0.85,  # raised 0.5→0.85: guarantee at least 85% of frames survive
 ) -> int:
     """
 
@@ -744,8 +744,8 @@ def extract_from_video(
     video_path:        str,
     output_dir:        str,
     fps:               float = None,
-    max_frames:        int   = 150,
-    blur_threshold:    float = 80.0,
+    max_frames:        int   = 300,   # raised 150→300: 3-min video needs dense coverage
+    blur_threshold:    float = 50.0,  # lowered 80→50: outdoor phone footage has natural blur
     adaptive_sampling: bool  = False,
 ) -> int:
 
@@ -759,7 +759,7 @@ def extract_from_video(
 
     # ------------------ METADATA + ADAPTIVE FPS ------------------
     SHORT_VIDEO_THRESHOLD = 25    # seconds — triggers high-density extraction
-    SHORT_VIDEO_MIN_FRAMES = 100  # minimum frames we want from a short video
+    SHORT_VIDEO_MIN_FRAMES = 150  # raised 100→150: more frames from short videos
 
     try:
         info     = get_video_info(str(video_path))
@@ -784,17 +784,18 @@ def extract_from_video(
                     f"native={native_fps:.1f} capped at {effective_native:.0f})"
                 )
             elif duration < 40:
-                # Medium duration 25–40 s: 3 fps gives ~75–120 frames.
-                fps = 3
+                # Medium duration 25–40 s: 4 fps gives ~100–160 frames.
+                fps = 4
             elif duration < 120:
-                # Standard object-capture clip 40–120 s: 2 fps gives ~80–240 frames.
-                fps = 2
+                # Standard object-capture clip 40–120 s: 3 fps gives ~120–360 frames.
+                fps = 3
             elif duration < 300:
-                # Long scene video 2–5 min: 1 fps keeps frame count within budget.
-                fps = 1
+                # Long scene video 2–5 min: 2 fps → ~240–600 frames (capped by max_frames).
+                # Raised from 1→2: 3-min video now yields ~360 raw frames before filtering.
+                fps = 2
             else:
-                # Very long video > 5 min: 0.5 fps.
-                fps = 0.5
+                # Very long video > 5 min: 1 fps.
+                fps = 1
 
         print(f"[extract] Adaptive FPS: {fps} (duration={duration:.1f}s, native={native_fps:.1f})")
         print(
@@ -905,19 +906,33 @@ def extract_from_video(
     _gc.collect()
 
     # ------------------ BLUR FILTER ------------------
-    kept_blur = filter_blurry_images(str(output_dir), threshold=max(blur_threshold, 120.0))  # floor at 120: reject blurry frames harder
+    kept_blur = filter_blurry_images(str(output_dir), threshold=blur_threshold)  # use threshold as-is; default now 50.0
 
     # ------------------ FEATURE FILTER (🔥 FIXED) ------------------
     kept = filter_low_feature_frames(
         str(output_dir),
         min_features=50,      # 🔥 reduced from 500
-        min_keep_ratio=0.7    # 🔥 keep more frames
+        min_keep_ratio=0.9    # raised 0.7→0.9: keep even more frames for dense coverage
     )
 
     # 🔥 SAFETY: never allow 0 frames
     if kept == 0:
         print("[extract] ⚠ All frames filtered — restoring original frames")
         kept = len(_image_files(output_dir))
+
+    # ------------------ MIN FRAME GUARANTEE ------------------
+    # If aggressive filtering still left too few frames, relax duplicate
+    # threshold and re-run to recover coverage.
+    MIN_FRAMES = 150
+    if kept < MIN_FRAMES:
+        print(f"[extract] ⚠ Low frame count ({kept}) — relaxing duplicate filter to 0.999 ...")
+        kept = filter_duplicate_viewpoints(
+            str(output_dir),
+            ssim_threshold=0.999,
+            hist_threshold=0.999,
+            min_keep_ratio=0.95,
+        )
+        print(f"[extract] After relaxed filter: {kept} frames")
 
     # ------------------ VIEWPOINT DIVERSITY FILTER ------------------
     kept = filter_duplicate_viewpoints(str(output_dir))
