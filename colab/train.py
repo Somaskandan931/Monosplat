@@ -409,6 +409,13 @@ def main() -> None:
         xyz = torch.from_numpy(xyz_np).float()
         rgb = torch.from_numpy(rgb_np).float()
 
+        # [CUDA-FIX-1] simple_knn.distCUDA2 requires a CUDA tensor.
+        # torch.from_numpy() always produces a CPU tensor — passing it to
+        # distCUDA2 causes cudaErrorIllegalAddress / SIGABRT exit -6.
+        if torch.cuda.is_available():
+            xyz = xyz.cuda()
+            rgb = rgb.cuda()
+
         log.info("Initialising %d Gaussians from sparse point cloud.", len(xyz))
 
         # FP-1 (foggy preview fix): pass cameras_extent as spatial_lr_scale so

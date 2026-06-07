@@ -564,15 +564,24 @@ def _distCUDA2(xyz: Tensor) -> Tensor:
 
     Priority:
       1. simple_knn.distCUDA2  — fast, but only safe for N ≤ _SIMPLE_KNN_SAFE_N
+                                  AND requires a CUDA tensor (CPU input →
+                                  cudaErrorIllegalAddress / SIGABRT exit -6)
       2. _dist_gpu_chunked     — correct for any N, runs on CUDA if available
       3. _dist_cpu_chunked     — CPU fallback when no CUDA device is present
     """
     n = xyz.shape[0]
+
+    # [CUDA-FIX-2] Never pass a CPU tensor to distCUDA2.
+    # simple_knn unconditionally dereferences a GPU pointer — a CPU tensor
+    # triggers cudaErrorIllegalAddress regardless of N.
+    if not xyz.is_cuda and torch.cuda.is_available():
+        xyz = xyz.cuda()
+
     try:
         from simple_knn._C import distCUDA2  # type: ignore
-        if n <= _SIMPLE_KNN_SAFE_N:
+        if n <= _SIMPLE_KNN_SAFE_N and xyz.is_cuda:
             return distCUDA2(xyz)
-        # N is too large for simple_knn — fall through to chunked GPU path
+        # N too large for simple_knn — fall through to chunked GPU path
     except ImportError:
         pass
 

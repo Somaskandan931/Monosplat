@@ -40,10 +40,10 @@ from pathlib import Path
 from torch.utils.data import Dataset
 from typing import List, Dict, Optional
 
-from src.utils.colmap_utils import (
+from utils.colmap_utils import (
     load_colmap_model, ColmapCamera, ColmapImage
 )
-from src.utils.image_utils import load_image_rgb
+from utils.image_utils import load_image_rgb
 
 
 class ColmapDataset(Dataset):

@@ -89,7 +89,14 @@ class Trainer:
         device = self._device_type
         self.model.to(device)
         self.model.train()
-        self._setup_optimizer()
+
+        # [RESUME-FIX-3] Only call _setup_optimizer if one hasn't been set up
+        # already (e.g. by train.py calling _setup_optimizer + resume_from_checkpoint
+        # before train()). Re-running _setup_optimizer after resume wipes the
+        # loaded Adam state (exp_avg, exp_avg_sq, step), discarding all momentum
+        # accumulated before the checkpoint — equivalent to a cold restart.
+        if self.optimizer is None:
+            self._setup_optimizer()
 
         viewpoint_stack = self.scene.get_train_cameras()
         self._train_started_at = time.time()
