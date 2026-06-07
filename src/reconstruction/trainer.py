@@ -89,12 +89,9 @@ class Trainer:
         device = self._device_type
         self.model.to(device)
         self.model.train()
-
-        # [RESUME-FIX-3] Only call _setup_optimizer if one hasn't been set up
-        # already (e.g. by train.py calling _setup_optimizer + resume_from_checkpoint
-        # before train()). Re-running _setup_optimizer after resume wipes the
-        # loaded Adam state (exp_avg, exp_avg_sq, step), discarding all momentum
-        # accumulated before the checkpoint — equivalent to a cold restart.
+        # [RESUME-FIX-3] Only init optimizer if not already set up by resume path.
+        # Re-running _setup_optimizer after resume_from_checkpoint wipes loaded
+        # Adam state (exp_avg, exp_avg_sq, step) — equivalent to cold restart.
         if self.optimizer is None:
             self._setup_optimizer()
 
@@ -350,14 +347,34 @@ class Trainer:
 
         n_current = self.model.get_xyz.shape[0]
         if n_current >= self.max_gaussians:
-            log.warning(f"Gaussian limit ({self.max_gaussians:,}). Pruning 20% at iter {iteration}.")
+            # [PRUNE-FIX-1] Smart cap handling: prune oversized Gaussians first.
+            # The old 20% opacity cull killed valid low-opacity background Gaussians
+            # (sky, foliage) causing bokeh-blob regression seen in previews.
+            # Strategy: cull world-size outliers (> 0.1 * extent) first — those are
+            # the bokeh blobs. If none exist, fall back to soft 10% opacity prune.
+            extent_cap = max(self.scene.cameras_extent, 1.0)
             with torch.no_grad():
-                opacities = self.model.get_opacity.squeeze(-1)
-                k_prune   = max(1, int(0.2 * n_current))
-                _, prune_idx = torch.topk(opacities, k=k_prune, largest=False)
-                prune_mask = torch.zeros(n_current, dtype=torch.bool, device=opacities.device)
-                prune_mask[prune_idx] = True
-            self.model._prune_points(prune_mask, self.optimizer)
+                big_ws = self.model.get_scaling.max(dim=1).values > 0.1 * extent_cap
+                n_big  = int(big_ws.sum().item())
+            if n_big > 0:
+                log.warning(
+                    "Gaussian limit (%d). Pruning %d oversized (scale > 0.1*extent) at iter %d.",
+                    self.max_gaussians, n_big, iteration,
+                )
+                self.model._prune_points(big_ws, self.optimizer)
+            else:
+                # Fallback: remove lowest 10% by opacity (was 20% — too aggressive)
+                log.warning(
+                    "Gaussian limit (%d). Soft-pruning 10%% by opacity at iter %d.",
+                    self.max_gaussians, iteration,
+                )
+                with torch.no_grad():
+                    opacities = self.model.get_opacity.squeeze(-1)
+                    k_prune   = max(1, int(0.10 * n_current))
+                    _, prune_idx = torch.topk(opacities, k=k_prune, largest=False)
+                    prune_mask = torch.zeros(n_current, dtype=torch.bool, device=opacities.device)
+                    prune_mask[prune_idx] = True
+                self.model._prune_points(prune_mask, self.optimizer)
             return
 
         # Grad diagnostic

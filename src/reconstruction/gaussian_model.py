@@ -262,12 +262,17 @@ class GaussianModel(nn.Module):
         self._densify_and_clone(grads, max_grad, extent, optimizer)
         self._densify_and_split(grads, max_grad, extent, optimizer, n_orig=n_orig)
 
-        # Prune: opacity floor + optional screen-size / world-size gates
+        # Prune: opacity floor + world-size gate (always) + screen-size gate (optional)
+        # [BIG-WS-FIX-1] big_ws (oversized Gaussian prune) is now UNCONDITIONAL.
+        # Previously it was gated behind max_screen_size > 0, but all training stages
+        # set max_screen=0 — so oversized Gaussians (the bokeh blobs) were NEVER pruned.
+        # big_vs (screen-pixel radii) remains optional, only used when max_screen_size > 0.
         prune_mask = (self.get_opacity < min_opacity).squeeze()
+        big_ws = self.get_scaling.max(dim=1).values > 0.5 * extent   # always applied
+        prune_mask = prune_mask | big_ws
         if max_screen_size > 0:
-            big_vs = self.max_radii2D > max_screen_size
-            big_ws = self.get_scaling.max(dim=1).values > 0.5 * extent
-            prune_mask = prune_mask | big_vs | big_ws
+            big_vs     = self.max_radii2D > max_screen_size           # screen-size only when requested
+            prune_mask = prune_mask | big_vs
 
         self._prune_points(prune_mask, optimizer)
 
@@ -564,24 +569,15 @@ def _distCUDA2(xyz: Tensor) -> Tensor:
 
     Priority:
       1. simple_knn.distCUDA2  — fast, but only safe for N ≤ _SIMPLE_KNN_SAFE_N
-                                  AND requires a CUDA tensor (CPU input →
-                                  cudaErrorIllegalAddress / SIGABRT exit -6)
       2. _dist_gpu_chunked     — correct for any N, runs on CUDA if available
       3. _dist_cpu_chunked     — CPU fallback when no CUDA device is present
     """
     n = xyz.shape[0]
-
-    # [CUDA-FIX-2] Never pass a CPU tensor to distCUDA2.
-    # simple_knn unconditionally dereferences a GPU pointer — a CPU tensor
-    # triggers cudaErrorIllegalAddress regardless of N.
-    if not xyz.is_cuda and torch.cuda.is_available():
-        xyz = xyz.cuda()
-
     try:
         from simple_knn._C import distCUDA2  # type: ignore
-        if n <= _SIMPLE_KNN_SAFE_N and xyz.is_cuda:
+        if n <= _SIMPLE_KNN_SAFE_N:
             return distCUDA2(xyz)
-        # N too large for simple_knn — fall through to chunked GPU path
+        # N is too large for simple_knn — fall through to chunked GPU path
     except ImportError:
         pass
 
