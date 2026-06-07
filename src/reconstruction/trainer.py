@@ -373,19 +373,29 @@ class Trainer:
 
         extent = max(self.scene.cameras_extent, 1.0)
 
-        # 3-stage densification
+        # [THRESH-FIX-1] 3-stage densification now derives grad_thresh from
+        # self.densify_grad_threshold (which comes from config.yaml) rather than
+        # using hardcoded values (0.00003 / 0.00005) that ignored the config.
+        # Stage multipliers: stabilize=0.1x, controlled=0.25x, normal=1.0x of config.
+        # This ensures config.yaml densify_grad_threshold is actually respected.
+        cfg_thresh = self.densify_grad_threshold
         if iteration < 2000:
             min_opacity = 0.0
-            grad_thresh = 0.00003
+            grad_thresh = cfg_thresh * 0.1     # very permissive warmup
             max_screen  = 0
         elif iteration < 15000:
             min_opacity = 0.0001
-            grad_thresh = 0.00005
+            grad_thresh = cfg_thresh * 0.25    # controlled growth
             max_screen  = 0
         else:
             min_opacity = 0.0005
-            grad_thresh = 0.0001
+            grad_thresh = cfg_thresh           # full config value
             max_screen  = 0   # big_vs disabled — world-space prune sufficient
+
+        log.info(
+            "[THRESH-DIAG] CONFIG=%.5f  USED=%.5f  iter=%d",
+            cfg_thresh, grad_thresh, iteration,
+        )
 
         before = self.model.get_xyz.shape[0]
         self.model.densify_and_prune(

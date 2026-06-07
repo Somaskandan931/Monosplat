@@ -66,6 +66,10 @@
 #   [T&T-10] renderer.max_gaussians synced to training.max_gaussians=200000.
 #   [T&T-11] colmap.camera_model default changed to SIMPLE_RADIAL for T&T
 #            dataset downloads.  Set to OPENCV for phone video input.
+#   [RESUME-FIX-2] auto_resume: true → false. Prevents evaluating stale checkpoints
+#           during debugging. Delete output/checkpoints/* before each fresh test run.
+#   [DEBUG-1] lambda_lpips: 0.1 → 0.0. LPIPS VGG net consumes ~2 GB extra VRAM.
+#           Disabled until training is stable; re-enable for final quality runs.
 #   [COLLAPSE-FIX-1] densify_from_iter: 500 → 1000. Extra warmup before densification.
 #   [COLLAPSE-FIX-2] densify_grad_threshold: 0.0005 → 0.0002. More clone/split events;
 #            stage-based pruning in trainer.py keeps early pruning conservative.
@@ -90,7 +94,7 @@ training:
 
   lambda_opacity_reg: 0.001
   lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
-  lambda_lpips: 0.1           # [T&T-9] was 0.05 — higher perceptual weight for outdoor scenes
+  lambda_lpips: 0.0           # [DEBUG-1] disabled — re-enable (0.1) once training is stable; avoids OOM during debugging
 
   percent_dense: 0.01
 
@@ -138,7 +142,7 @@ colmap:
 
 runtime:
   auto_profile: true          # notebook applies HARDWARE_TIERS overrides
-  auto_resume: true
+  auto_resume: false          # [RESUME-FIX-2] disabled for clean debugging runs; re-enable after fixing resume path
   cache_cleanup_interval: 500
   drive_persistence: true
   drive_root: /content/drive/MyDrive/MonoSplat

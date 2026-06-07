@@ -101,7 +101,12 @@ logging.basicConfig(
 # that keeps initialization density high while staying well inside the chunked
 # path. Reconstruction quality is not materially affected: 3DGS densification
 # adds Gaussians from iter 500 onward regardless of seed density.
-MAX_INIT_GAUSSIANS: int = 100_000
+# [INIT-REDUCE-1] Reduced from 100_000 → 30_000.
+# Starting smaller lets densification grow a cleaner structure rather than
+# overwhelming the optimizer with a dense, poorly-spaced seed cloud.
+# simple_knn is safe for N ≤ 65k so 30k is well inside the safe zone.
+# Densification from iter 500 will grow this to max_gaussians as needed.
+MAX_INIT_GAUSSIANS: int = 30_000
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────
@@ -367,29 +372,60 @@ def main() -> None:
     )
     dataset.cameras_extent = cameras_extent
 
-    # ── Point cloud → Gaussian init ───────────────────────────────────────────
-    xyz_np, rgb_np = get_sparse_point_cloud(points3D)
-    xyz_np, rgb_np = subsample_point_cloud(xyz_np, rgb_np, MAX_INIT_GAUSSIANS)
-
-    xyz = torch.from_numpy(xyz_np).float()
-    rgb = torch.from_numpy(rgb_np).float()
-
-    log.info("Initialising %d Gaussians from sparse point cloud.", len(xyz))
-
+    # ── Point cloud → Gaussian init  OR  checkpoint resume ───────────────────
+    # [RESUME-FIX-1] Only call initialise_from_pcd on a fresh start.
+    # Previously the code always initialised 100k Gaussians from the PCD and
+    # THEN loaded the checkpoint on top, wasting VRAM and potentially leaving
+    # stale accumulator state from the unused PCD init.
     model = GaussianModel(sh_degree=cfg["model"]["sh_degree"])
-    # FP-1 (foggy preview fix): pass cameras_extent as spatial_lr_scale so
-    # initialise_from_pcd computes the initial Gaussian size ceiling relative
-    # to the actual scene radius rather than an absolute 1.0 world-unit.
-    # With cameras_extent=1.0 (post-normalization floor), each Gaussian starts
-    # at diameter ≈ 0.1 world-units — correct for a unit-sphere scene.
-    model.initialise_from_pcd(xyz, rgb, spatial_lr_scale=cameras_extent)
-
-    # ── Trainer ───────────────────────────────────────────────────────────────
-    trainer = Trainer(cfg=cfg, model=model, scene=dataset)
 
     if resume_path:
+        # Resuming: load checkpoint directly — skip PCD init entirely.
+        log.info(
+            "Resuming from checkpoint — skipping PCD initialisation. "
+            "VRAM savings: ~%d MB", int(MAX_INIT_GAUSSIANS * 80 / 1024 / 1024)
+        )
+        # Memory diagnostics before resume
+        if torch.cuda.is_available():
+            log.info(
+                "[MEM pre-resume] allocated=%.2f GB  reserved=%.2f GB",
+                torch.cuda.memory_allocated() / 1024**3,
+                torch.cuda.memory_reserved()  / 1024**3,
+            )
+        trainer = Trainer(cfg=cfg, model=model, scene=dataset)
         trainer._setup_optimizer()
         trainer.resume_from_checkpoint(str(resume_path))
+        if torch.cuda.is_available():
+            log.info(
+                "[MEM post-resume] allocated=%.2f GB  reserved=%.2f GB",
+                torch.cuda.memory_allocated() / 1024**3,
+                torch.cuda.memory_reserved()  / 1024**3,
+            )
+    else:
+        # Fresh start: initialise from sparse point cloud.
+        xyz_np, rgb_np = get_sparse_point_cloud(points3D)
+        xyz_np, rgb_np = subsample_point_cloud(xyz_np, rgb_np, MAX_INIT_GAUSSIANS)
+
+        xyz = torch.from_numpy(xyz_np).float()
+        rgb = torch.from_numpy(rgb_np).float()
+
+        log.info("Initialising %d Gaussians from sparse point cloud.", len(xyz))
+
+        # FP-1 (foggy preview fix): pass cameras_extent as spatial_lr_scale so
+        # initialise_from_pcd computes the initial Gaussian size ceiling relative
+        # to the actual scene radius rather than an absolute 1.0 world-unit.
+        # With cameras_extent=1.0 (post-normalization floor), each Gaussian starts
+        # at diameter ≈ 0.1 world-units — correct for a unit-sphere scene.
+        model.initialise_from_pcd(xyz, rgb, spatial_lr_scale=cameras_extent)
+
+        if torch.cuda.is_available():
+            log.info(
+                "[MEM post-init-pcd] allocated=%.2f GB  reserved=%.2f GB",
+                torch.cuda.memory_allocated() / 1024**3,
+                torch.cuda.memory_reserved()  / 1024**3,
+            )
+
+        trainer = Trainer(cfg=cfg, model=model, scene=dataset)
 
     trainer.train()
 
