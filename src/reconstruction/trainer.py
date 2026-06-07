@@ -85,20 +85,20 @@ class Trainer:
     # Main training loop
     # ------------------------------------------------------------------
 
-    def train(self) -> None:
+    def train(self, start_iter: int = 1) -> None:
         device = self._device_type
         self.model.to(device)
         self.model.train()
-        # [RESUME-FIX-3] Only init optimizer if not already set up by resume path.
-        # Re-running _setup_optimizer after resume_from_checkpoint wipes loaded
-        # Adam state (exp_avg, exp_avg_sq, step) — equivalent to cold restart.
         if self.optimizer is None:
             self._setup_optimizer()
 
         viewpoint_stack = self.scene.get_train_cameras()
         self._train_started_at = time.time()
 
-        for iteration in range(1, self.iterations + 1):
+        if start_iter > 1:
+            log.info("[Trainer] Resuming training from iter %d / %d", start_iter, self.iterations)
+
+        for iteration in range(start_iter, self.iterations + 1):
             self._current_iter = iteration
             viewpoint = _pick_viewpoint(viewpoint_stack)
 
@@ -347,34 +347,14 @@ class Trainer:
 
         n_current = self.model.get_xyz.shape[0]
         if n_current >= self.max_gaussians:
-            # [PRUNE-FIX-1] Smart cap handling: prune oversized Gaussians first.
-            # The old 20% opacity cull killed valid low-opacity background Gaussians
-            # (sky, foliage) causing bokeh-blob regression seen in previews.
-            # Strategy: cull world-size outliers (> 0.1 * extent) first — those are
-            # the bokeh blobs. If none exist, fall back to soft 10% opacity prune.
-            extent_cap = max(self.scene.cameras_extent, 1.0)
+            log.warning(f"Gaussian limit ({self.max_gaussians:,}). Pruning 20% at iter {iteration}.")
             with torch.no_grad():
-                big_ws = self.model.get_scaling.max(dim=1).values > 0.1 * extent_cap
-                n_big  = int(big_ws.sum().item())
-            if n_big > 0:
-                log.warning(
-                    "Gaussian limit (%d). Pruning %d oversized (scale > 0.1*extent) at iter %d.",
-                    self.max_gaussians, n_big, iteration,
-                )
-                self.model._prune_points(big_ws, self.optimizer)
-            else:
-                # Fallback: remove lowest 10% by opacity (was 20% — too aggressive)
-                log.warning(
-                    "Gaussian limit (%d). Soft-pruning 10%% by opacity at iter %d.",
-                    self.max_gaussians, iteration,
-                )
-                with torch.no_grad():
-                    opacities = self.model.get_opacity.squeeze(-1)
-                    k_prune   = max(1, int(0.10 * n_current))
-                    _, prune_idx = torch.topk(opacities, k=k_prune, largest=False)
-                    prune_mask = torch.zeros(n_current, dtype=torch.bool, device=opacities.device)
-                    prune_mask[prune_idx] = True
-                self.model._prune_points(prune_mask, self.optimizer)
+                opacities = self.model.get_opacity.squeeze(-1)
+                k_prune   = max(1, int(0.2 * n_current))
+                _, prune_idx = torch.topk(opacities, k=k_prune, largest=False)
+                prune_mask = torch.zeros(n_current, dtype=torch.bool, device=opacities.device)
+                prune_mask[prune_idx] = True
+            self.model._prune_points(prune_mask, self.optimizer)
             return
 
         # Grad diagnostic
@@ -397,29 +377,19 @@ class Trainer:
 
         extent = max(self.scene.cameras_extent, 1.0)
 
-        # [THRESH-FIX-1] 3-stage densification now derives grad_thresh from
-        # self.densify_grad_threshold (which comes from config.yaml) rather than
-        # using hardcoded values (0.00003 / 0.00005) that ignored the config.
-        # Stage multipliers: stabilize=0.1x, controlled=0.25x, normal=1.0x of config.
-        # This ensures config.yaml densify_grad_threshold is actually respected.
-        cfg_thresh = self.densify_grad_threshold
+        # 3-stage densification
         if iteration < 2000:
             min_opacity = 0.0
-            grad_thresh = cfg_thresh * 0.1     # very permissive warmup
+            grad_thresh = 0.00003
             max_screen  = 0
         elif iteration < 15000:
             min_opacity = 0.0001
-            grad_thresh = cfg_thresh * 0.25    # controlled growth
+            grad_thresh = 0.00005
             max_screen  = 0
         else:
             min_opacity = 0.0005
-            grad_thresh = cfg_thresh           # full config value
+            grad_thresh = 0.0001
             max_screen  = 0   # big_vs disabled — world-space prune sufficient
-
-        log.info(
-            "[THRESH-DIAG] CONFIG=%.5f  USED=%.5f  iter=%d",
-            cfg_thresh, grad_thresh, iteration,
-        )
 
         before = self.model.get_xyz.shape[0]
         self.model.densify_and_prune(
@@ -473,7 +443,8 @@ class Trainer:
                 pass
         return ckpt_path
 
-    def resume_from_checkpoint(self, ckpt_path: str) -> None:
+    def resume_from_checkpoint(self, ckpt_path: str) -> int:
+        """Load checkpoint and return the saved iteration number."""
         log.info(f"[Trainer] Resuming from checkpoint: {ckpt_path}")
         state = torch.load(ckpt_path, map_location=self._device_type)
         model_state = state.get("model") or state.get("model_state")
@@ -492,6 +463,10 @@ class Trainer:
             for p in self.model.parameters():
                 if torch.isnan(p).any() or torch.isinf(p).any():
                     p.data = torch.nan_to_num(p.data, nan=0.0, posinf=1.0, neginf=-1.0)
+        saved_iter = int(state.get("iteration", 0))
+        log.info("[Trainer] Checkpoint iteration: %d. Training will resume from iter %d.",
+                 saved_iter, saved_iter + 1)
+        return saved_iter
 
     def _load_model_state_dynamic(self, model_state: Dict) -> None:
         self.model._xyz           = nn.Parameter(model_state["_xyz"].detach().to(self._device_type).float())
