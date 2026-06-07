@@ -103,9 +103,61 @@ def look_at(eye: np.ndarray, target: np.ndarray, up: np.ndarray) -> np.ndarray:
     return m
 
 
+def proj_matrix_3dgs(fovx_rad: float, fovy_rad: float, near: float, far: float) -> np.ndarray:
+    """
+    Return a 4×4 projection matrix matching the original Graphdeco gaussian-splatting
+    convention exactly (graphics_utils.py::getProjectionMatrix, z_sign=+1).
+
+    Convention notes
+    ----------------
+    * P[3,2] = +1.0  → the homogeneous weight w = z_view  (positive-z forward,
+      matching COLMAP / OpenCV / diff-gaussian-rasterization).
+    * Depth NDC ∈ [0, 1]:  0 at the near plane, 1 at the far plane.
+    * fx and fy are treated independently, so non-square-pixel sensors work
+      correctly (fx ≠ fy).
+
+    IMPORTANT — transpose before passing to the CUDA rasterizer
+    -----------------------------------------------------------
+    diff-gaussian-rasterization reads matrices in **column-major** order
+    (GLM / Fortran layout), while numpy/PyTorch store arrays in row-major
+    (C layout).  The caller (Camera.full_proj_transform) handles the transpose;
+    do NOT transpose this matrix directly.
+
+    The original 3DGS code does:
+        projection_matrix = getProjectionMatrix(...).transpose(0, 1)   # store P^T
+        full_proj = world_view_transform @ projection_matrix           # = W2C^T @ P^T
+
+    This function returns P (un-transposed); Camera.full_proj_transform
+    computes the equivalent: view_matrix.T @ proj_matrix.T
+
+    Args:
+        fovx_rad: Horizontal field of view in **radians**.
+        fovy_rad: Vertical   field of view in **radians**.
+        near:     Near clipping plane (must be > 0).
+        far:      Far  clipping plane (must be > near).
+
+    Returns:
+        (4, 4) float32 projection matrix P  (row-major, un-transposed).
+    """
+    if near <= 0 or far <= near:
+        raise ValueError(f"Invalid near/far planes: near={near}, far={far}")
+    import math as _math
+    P = np.zeros((4, 4), dtype=np.float32)
+    P[0, 0] = 1.0 / _math.tan(fovx_rad / 2.0)   # 1/tanHalfFovX  (= fx / (W/2) when centred)
+    P[1, 1] = 1.0 / _math.tan(fovy_rad / 2.0)   # 1/tanHalfFovY  (= fy / (H/2) when centred)
+    P[3, 2] = 1.0                                 # w = z_view  (perspective divide by depth)
+    P[2, 2] = far / (far - near)                  # depth NDC: 0 at near, 1 at far
+    P[2, 3] = -(far * near) / (far - near)
+    return P
+
+
 def perspective_matrix(fov_deg: float, aspect: float, near: float, far: float) -> np.ndarray:
     """
-    Return a 4×4 perspective projection matrix (OpenGL convention).
+    **DEPRECATED** — kept for backward-compatibility with non-CUDA callers only.
+
+    For the diff-gaussian-rasterization CUDA kernel use proj_matrix_3dgs() instead.
+    This function uses the OpenGL convention (P[3,2]=-1, z NDC ∈ [-1,+1]) which is
+    INCOMPATIBLE with the 3DGS CUDA rasterizer.
 
     Args:
         fov_deg: Vertical field of view in degrees.
@@ -114,10 +166,17 @@ def perspective_matrix(fov_deg: float, aspect: float, near: float, far: float) -
         far:     Far clipping plane (must be > near).
 
     Returns:
-        (4, 4) float32 projection matrix.
+        (4, 4) float32 projection matrix (OpenGL convention).
     """
     if near <= 0 or far <= near:
         raise ValueError(f"Invalid near/far planes: near={near}, far={far}")
+    import math as _math
+    import warnings
+    warnings.warn(
+        "perspective_matrix() uses OpenGL convention and is incompatible with "
+        "diff-gaussian-rasterization.  Use proj_matrix_3dgs() for training/rendering.",
+        DeprecationWarning, stacklevel=2,
+    )
     f = 1.0 / np.tan(np.radians(fov_deg) / 2.0)
     m = np.zeros((4, 4), dtype=np.float32)
     m[0, 0] = f / aspect
