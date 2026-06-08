@@ -5,7 +5,7 @@
 # MONOSPLAT_EXTRA_TRAIN_ARGS environment variable, which train.py reads through
 # _apply_env_overrides().  You do NOT need separate t4.yaml / l4.yaml / a100.yaml
 # files — those have been deleted.  Edit the HARDWARE_TIERS dict in the notebook
-# Cell 2 to change per-tier values.  The values below are the T4 (15 GB) baseline
+# Cell 2 to change per-tier values.  The values below are the T4 (14 GB) baseline
 # tuned for Tanks and Temples style footage.
 #
 # ── TIER REFERENCE (T&T tuned) ────────────────────────────────────────────────
@@ -78,7 +78,7 @@ training:
   # DENSIFICATION ENABLED — standard 3DGS clone/split/prune pipeline.
   # Start with 50k init points, grow to max_gaussians via densification.
   densify_from_iter: 500
-  densify_until_iter: 12000
+  densify_until_iter: 16000
   densification_interval: 200
   densify_grad_threshold: 0.0002
 

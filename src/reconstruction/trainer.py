@@ -42,7 +42,7 @@ log = logging.getLogger(__name__)
 class Trainer:
     """Trains a GaussianModel via differentiable splatting."""
 
-    _DEFAULT_MAX_GAUSSIANS = 300000
+    _DEFAULT_MAX_GAUSSIANS = 200000  # T4 (14 GB) safe cap — matches config.yaml renderer.max_gaussians
 
     def __init__(self, cfg: Dict, model: nn.Module, scene) -> None:
         self.cfg   = cfg
@@ -53,10 +53,10 @@ class Trainer:
 
         self.iterations:             int   = train_cfg.get("iterations",             30000)
         self.densify_from_iter:      int   = train_cfg.get("densify_from_iter",      500)
-        self.densify_until_iter:     int   = train_cfg.get("densify_until_iter",     15000)
+        self.densify_until_iter:     int   = train_cfg.get("densify_until_iter",     16000)
         self.densification_interval: int   = train_cfg.get("densification_interval", 200)
-        self.densify_grad_threshold: float = train_cfg.get("densify_grad_threshold", 0.0003)
-        self.max_gaussians:          int   = train_cfg.get("max_gaussians",          150000)
+        self.densify_grad_threshold: float = train_cfg.get("densify_grad_threshold", 0.0002)
+        self.max_gaussians:          int   = train_cfg.get("max_gaussians",          200000)
         self.opacity_reset_interval: int   = train_cfg.get("opacity_reset_interval", 3000)
         self.lambda_dssim:           float = train_cfg.get("lambda_dssim",           0.2)
         self.model_path:             str   = cfg.get("model_path", "outputs/gaussian")
@@ -382,7 +382,7 @@ class Trainer:
             min_opacity = 0.0
             grad_thresh = 0.00003
             max_screen  = 0
-        elif iteration < 15000:
+        elif iteration < self.densify_until_iter:
             min_opacity = 0.0001
             grad_thresh = 0.00005
             max_screen  = 0
@@ -412,7 +412,7 @@ class Trainer:
             "[DENSIFY] iter=%d  before=%d  after=%d  delta=%+d  "
             "stage=%s  min_opacity=%.4f  grad_thresh=%.5f  extent=%.4f",
             iteration, before, after, after - before,
-            "stabilize" if iteration < 2000 else ("controlled" if iteration < 15000 else "normal"),
+            "stabilize" if iteration < 2000 else ("controlled" if iteration < self.densify_until_iter else "normal"),
             min_opacity, grad_thresh, extent,
         )
 
