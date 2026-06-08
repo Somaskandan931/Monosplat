@@ -266,6 +266,18 @@ def load_colmap_model(sparse_dir: str) -> tuple:
     d = Path(sparse_dir)
 
     if not (d / "cameras.txt").exists():
+        # Binary format detection: T&T and many COLMAP outputs ship .bin, not .txt.
+        # Give an actionable error immediately instead of a cryptic FileNotFoundError.
+        if (d / "cameras.bin").exists():
+            raise FileNotFoundError(
+                f"Binary COLMAP model detected at {d}.\n"
+                f"MonoSplat requires text format. Convert with:\n\n"
+                f"  colmap model_converter \\\n"
+                f"    --input_path  {d} \\\n"
+                f"    --output_path {d.parent / 'sparse_text'} \\\n"
+                f"    --output_type TXT\n\n"
+                f"Then pass --sparse {d.parent / 'sparse_text'}"
+            )
         for candidate in [d / "sparse_text", d.parent / "sparse_text"]:
             if (candidate / "cameras.txt").exists():
                 _logging.getLogger("monosplat.utils.colmap").warning(

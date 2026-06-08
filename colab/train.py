@@ -106,7 +106,7 @@ logging.basicConfig(
 # 150K is safe on T4/A100 (max_gaussians budget is 200K). The old comment
 # "Starting smaller produces better structure" is incorrect for 3DGS — it
 # applies to NeRF hash-grid models, not splatting.
-MAX_INIT_GAUSSIANS: int = 150_000
+MAX_INIT_GAUSSIANS: int = 100_000  # [14GB-4] reduced from 150k — limits init VRAM before densification starts
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────────

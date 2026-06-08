@@ -516,11 +516,14 @@ def filter_low_feature_frames(
         threshold = sorted_counts[min_keep - 1][1]
         print(f"[extract] â  Relaxed threshold to {threshold} to keep {min_keep} frames")
 
+    low_feat_dir = image_dir / "low_feature"
+    low_feat_dir.mkdir(exist_ok=True)
+
     removed = 0
     for p, n in counts:
         if n < threshold:
             try:
-                p.unlink()
+                p.rename(low_feat_dir / p.name)
                 removed += 1
             except Exception:
                 pass
@@ -960,12 +963,40 @@ def extract_from_video(
         print("[extract] â  All frames filtered â restoring original frames")
         kept = len(_image_files(output_dir))
 
-    # ------------------ MIN FRAME GUARANTEE ------------------
-    # If aggressive filtering still left too few frames, relax duplicate
-    # threshold and re-run to recover coverage.
+    # ------------------ MIN FRAME GUARANTEE (pre-duplicate) ------------------
+    # If the feature filter over-pruned on a low-texture scene, recover those
+    # frames before the duplicate filter so they get a second chance.
     MIN_FRAMES = 150
     if kept < MIN_FRAMES:
-        print(f"[extract] â  Low frame count ({kept}) â relaxing duplicate filter to 0.999 ...")
+        low_feat_dir = output_dir / "low_feature"
+        if low_feat_dir.exists():
+            for f in sorted(low_feat_dir.iterdir()):
+                if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png"}:
+                    try:
+                        f.rename(output_dir / f.name)
+                    except Exception:
+                        pass
+        kept = len(_image_files(output_dir))
+        print(f"[extract] Recovered low-feature frames; {kept} frames before duplicate filter.")
+
+    # ------------------ VIEWPOINT DIVERSITY FILTER ------------------
+    # Run at default thresholds first. If still below MIN_FRAMES after,
+    # restore moved files and re-run with relaxed thresholds.
+    kept = filter_duplicate_viewpoints(str(output_dir))
+
+    if kept < MIN_FRAMES:
+        print(
+            f"[extract] â  Low frame count ({kept}) after duplicate filter â "
+            f"recovering from duplicates/ and relaxing thresholds ..."
+        )
+        dup_dir = output_dir / "duplicates"
+        if dup_dir.exists():
+            for f in sorted(dup_dir.iterdir()):
+                if f.is_file() and f.suffix.lower() in {".jpg", ".jpeg", ".png"}:
+                    try:
+                        f.rename(output_dir / f.name)
+                    except Exception:
+                        pass
         kept = filter_duplicate_viewpoints(
             str(output_dir),
             ssim_threshold=0.999,
@@ -973,9 +1004,6 @@ def extract_from_video(
             min_keep_ratio=0.95,
         )
         print(f"[extract] After relaxed filter: {kept} frames")
-
-    # ------------------ VIEWPOINT DIVERSITY FILTER ------------------
-    kept = filter_duplicate_viewpoints(str(output_dir))
 
     # ------------------ SMART FRAME SELECTION ------------------
     selection_report = run_smart_frame_selection(str(output_dir), budget=max_frames)
@@ -1099,7 +1127,7 @@ def copy_images(
 
     print(f"[extract] Copied {len(images)} images â {output_dir}")
     validate_images(str(output_dir))
-    filter_blurry_images(str(output_dir), threshold=120.0)  # 80â120
+    filter_blurry_images(str(output_dir), threshold=60.0)   # [BUG3-FIX] 120 too strict for pre-shot sets
     kept = filter_low_feature_frames(str(output_dir), min_keep_ratio=0.4)
     selection_report = run_smart_frame_selection(str(output_dir), budget=max_frames)
     return selection_report.get("selected_frame_count", kept)
