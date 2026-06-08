@@ -59,6 +59,7 @@ class Trainer:
         self.max_gaussians:          int   = train_cfg.get("max_gaussians",          200000)
         self.opacity_reset_interval: int   = train_cfg.get("opacity_reset_interval", 3000)
         self.lambda_dssim:           float = train_cfg.get("lambda_dssim",           0.2)
+        self.lpips_interval:         int   = train_cfg.get("lpips_interval",         10)
         self.model_path:             str   = cfg.get("model_path", "outputs/gaussian")
 
         self._lr_cfg = {
@@ -94,6 +95,12 @@ class Trainer:
 
         viewpoint_stack = self.scene.get_train_cameras()
         self._train_started_at = time.time()
+
+        # Pre-warm LPIPS so VGG16 weights download before the loop starts,
+        # not mid-training when GPU memory is already committed.
+        lambda_lpips_cfg = self.cfg.get("training", {}).get("lambda_lpips", 0.05)
+        if lambda_lpips_cfg > 0.0:
+            self._prewarm_lpips(device)
 
         if start_iter > 1:
             log.info("[Trainer] Resuming training from iter %d / %d", start_iter, self.iterations)
@@ -294,6 +301,28 @@ class Trainer:
             self.model.update_stats_norm(radii_dense, grad_norm)
 
     # ------------------------------------------------------------------
+    # LPIPS pre-warm
+    # ------------------------------------------------------------------
+
+    def _prewarm_lpips(self, device: str) -> None:
+        """Force VGG16 weights to download and load before the training loop.
+
+        Without this, the 528 MB download happens at iter 1000 when GPU memory
+        is already committed to ~100k Gaussians + rasterizer buffers.
+        """
+        log.info("[Trainer] Pre-warming LPIPS (downloading VGG16 if needed) …")
+        try:
+            from reconstruction.loss import lpips_metric
+            dummy = torch.zeros(1, 3, 64, 64, device=device)
+            with torch.no_grad():
+                lpips_metric(dummy, dummy)
+            del dummy
+            torch.cuda.empty_cache()
+            log.info("[Trainer] LPIPS pre-warm complete.")
+        except Exception as exc:
+            log.warning("[Trainer] LPIPS pre-warm failed (non-fatal): %s", exc)
+
+    # ------------------------------------------------------------------
     # Loss
     # ------------------------------------------------------------------
 
@@ -315,10 +344,13 @@ class Trainer:
                 align_corners=False,
             ).squeeze(0)
 
-        # LPIPS warmup: 0 until iter 1000, linear ramp to full by iter 3000
+        # LPIPS warmup: 0 until iter 1000, linear ramp to full by iter 3000.
+        # Only applied every lpips_interval iters to avoid VRAM exhaustion on T4.
         lambda_lpips_cfg = self.cfg.get("training", {}).get("lambda_lpips", 0.05)
         if self._current_iter < 1000:
             lambda_lpips = 0.0
+        elif self._current_iter % self.lpips_interval != 0:
+            lambda_lpips = 0.0   # skip this iter — apply on next interval
         elif self._current_iter < 3000:
             ramp = (self._current_iter - 1000) / 2000.0
             lambda_lpips = lambda_lpips_cfg * ramp

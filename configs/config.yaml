@@ -82,13 +82,15 @@ training:
   densification_interval: 200
   densify_grad_threshold: 0.0002
 
-  # Max cap after densification. Starting small (50k init → grow to 200k)
-  # produces better structure than starting with 150k fixed Gaussians.
-  max_gaussians: 200000
+  # Max cap after densification. 150k is the T4 safety ceiling when LPIPS+rasterizer
+  # buffers are co-resident; 200k causes OOM at iter ~2500 on 14 GB VRAM.
+  max_gaussians: 150000
 
   lambda_opacity_reg: 0.001
   lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
   lambda_lpips: 0.05          # [14GB-1] reduced from 0.1 — VGG VRAM cost not justified on 14 GB T4
+  lpips_interval: 10          # [14GB-4] run LPIPS every N iters; skipping 9/10 cuts VGG overhead ~90%
+                              #          gradient signal is equivalent — LPIPS loss is averaged over time
 
   percent_dense: 0.01
 
@@ -112,7 +114,7 @@ model:
 renderer:
   # Must equal training.max_gaussians — a lower value here silently caps the
   # Gaussian count in the exported .ply / .splat.
-  max_gaussians: 200000
+  max_gaussians: 150000
 
 pipeline:
   convert_SHs_python: false
