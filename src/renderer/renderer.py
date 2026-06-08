@@ -202,26 +202,42 @@ class GaussianRenderer:
 
         bg = self.bg_color.to(device)
 
-        raster_settings = GaussianRasterizationSettings(
-            image_height=int(camera.image_height),
-            image_width=int(camera.image_width),
-            tanfovx=tanfovx,
-            tanfovy=tanfovy,
-            bg=bg,
-            scale_modifier=1.0,
-            viewmatrix=torch.tensor(
+        # [API-FIX-1] GaussianRasterizationSettings signature varies by installed version.
+        # Some builds require 'antialiasing'; some don't have it at all; the newest
+        # builds also added 'depth_ratio' and changed argument order.
+        # Probe the dataclass fields at runtime and only pass what's accepted.
+        import inspect, dataclasses
+        _base_kwargs = dict(
+            image_height   = int(camera.image_height),
+            image_width    = int(camera.image_width),
+            tanfovx        = tanfovx,
+            tanfovy        = tanfovy,
+            bg             = bg,
+            scale_modifier = 1.0,
+            viewmatrix     = torch.tensor(
                 camera.world_view_transform, dtype=torch.float32, device=device
             ),
-            projmatrix=torch.tensor(
+            projmatrix     = torch.tensor(
                 camera.full_proj_transform, dtype=torch.float32, device=device
             ),
-            sh_degree=model.active_sh_degree,
-            campos=torch.tensor(
+            sh_degree      = model.active_sh_degree,
+            campos         = torch.tensor(
                 camera.position, dtype=torch.float32, device=device
             ),
-            prefiltered=False,
-            debug=False,
+            prefiltered    = False,
+            debug          = False,
         )
+        # Optional fields added in newer builds — only inject if the class expects them
+        _optional = {"antialiasing": False, "depth_ratio": 0.0}
+        try:
+            _fields = {f.name for f in dataclasses.fields(GaussianRasterizationSettings)}
+        except TypeError:
+            # Not a dataclass — fall back to inspecting __init__
+            _fields = set(inspect.signature(GaussianRasterizationSettings).parameters.keys())
+        for _k, _v in _optional.items():
+            if _k in _fields:
+                _base_kwargs[_k] = _v
+        raster_settings = GaussianRasterizationSettings(**_base_kwargs)
 
         rasterizer = GaussianRasterizer(raster_settings=raster_settings)
 
