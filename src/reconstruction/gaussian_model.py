@@ -66,7 +66,7 @@ class GaussianModel(nn.Module):
     @property
     def get_scaling(self) -> Tensor:
         return torch.exp(
-            torch.clamp(self._scales, min=-10.0, max=self._max_log_scale)
+            torch.clamp(self._scales, min=-7.0, max=self._max_log_scale)
         )
 
     @property
@@ -149,7 +149,7 @@ class GaussianModel(nn.Module):
         dist2 = dist2.clamp(min=1e-7)
         scales_init = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
         scales_init = scales_init.clamp(
-            min=-10.0, max=self._max_log_scale
+            min=-7.0, max=self._max_log_scale
         )
 
         # Unit quaternions (no rotation)
@@ -245,6 +245,30 @@ class GaussianModel(nn.Module):
     # Densification entry point
     # ------------------------------------------------------------------
 
+    def reset_opacity(self, optimizer=None, value: float = 0.01) -> None:
+        """
+        Reset all opacities to a low value (standard 3DGS anti-floater trick).
+
+        Periodically forcing every Gaussian to become near-transparent lets
+        gradient descent "re-earn" opacity only for Gaussians that genuinely
+        improve the render, pruning away needle/floater Gaussians that had
+        drifted to high opacity without contributing real detail.
+        """
+        with torch.no_grad():
+            target = _inverse_sigmoid(
+                torch.full_like(self._opacities, value)
+            )
+            self._opacities.data.copy_(target)
+
+        if optimizer is not None:
+            for group in optimizer.param_groups:
+                if group.get("name") == "opacity" and len(group["params"]) == 1:
+                    p = group["params"][0]
+                    state = optimizer.state.get(p, {})
+                    if "exp_avg" in state:
+                        state["exp_avg"].zero_()
+                        state["exp_avg_sq"].zero_()
+
     def densify_and_prune(
         self,
         max_grad:        float,
@@ -338,7 +362,7 @@ class GaussianModel(nn.Module):
         new_xyz = (R_mats @ samples.unsqueeze(-1)).squeeze(-1) \
                   + self._xyz[selected].repeat(N, 1)
 
-        new_scales = torch.log(scales).clamp(-10.0, self._max_log_scale)
+        new_scales = torch.log(scales).clamp(-7.0, self._max_log_scale)
 
         new_tensors = {
             "xyz":      new_xyz,

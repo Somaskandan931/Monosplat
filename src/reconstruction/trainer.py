@@ -407,6 +407,14 @@ class Trainer:
     def _maybe_densify(self, iteration: int) -> None:
         if not self.enable_densification:
             return
+
+        # Periodic opacity reset (standard 3DGS anti-floater/anti-needle trick).
+        # Runs independent of the densify_from/until window check below so it
+        # still fires even on the boundary iterations.
+        if iteration % 3000 == 0 and iteration < self.densify_until_iter:
+            log.info(f"[Trainer] Resetting opacities at iter {iteration}")
+            self.model.reset_opacity(self.optimizer)
+
         if iteration < self.densify_from_iter:
             return
         if iteration > self.densify_until_iter:

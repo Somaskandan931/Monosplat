@@ -80,11 +80,11 @@ training:
   densify_from_iter: 500
   densify_until_iter: 16000
   densification_interval: 200
-  densify_grad_threshold: 0.0002
+  densify_grad_threshold: 0.0003
 
   # Max cap after densification. 150k is the T4 safety ceiling when LPIPS+rasterizer
   # buffers are co-resident; 200k causes OOM at iter ~2500 on 14 GB VRAM.
-  max_gaussians: 150000
+  max_gaussians: 120000
 
   lambda_opacity_reg: 0.001
   lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
@@ -109,12 +109,12 @@ training:
   test_iterations: [10000, 20000]
 
 model:
-  sh_degree: 1   # [14GB-2] degree 3 → 48 colour floats/Gaussian; degree 1 → 12. ~4× less feature VRAM.
+  sh_degree: 2
 
 renderer:
   # Must equal training.max_gaussians — a lower value here silently caps the
   # Gaussian count in the exported .ply / .splat.
-  max_gaussians: 150000
+  max_gaussians: 120000
 
 pipeline:
   convert_SHs_python: false
