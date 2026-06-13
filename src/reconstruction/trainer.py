@@ -33,6 +33,7 @@ import time
 from pathlib import Path
 from typing import Dict, Optional
 
+import numpy as np
 import torch
 import torch.nn as nn
 
@@ -174,6 +175,42 @@ class Trainer:
                     f"N={n_gaussians:,}  "
                     f"sh_deg={self.model.active_sh_degree}"
                 )
+
+        self._evaluate_and_save_metrics()
+
+    def _evaluate_and_save_metrics(self) -> None:
+        """Compute mean PSNR/SSIM/LPIPS on held-out test views and write metrics.json."""
+        test_cameras = []
+        if hasattr(self.scene, "get_test_cameras"):
+            test_cameras = self.scene.get_test_cameras()
+        if not test_cameras:
+            log.warning("[Trainer] No held-out test views — skipping metrics.")
+            return
+
+        self.model.eval()
+        results = {"psnr": [], "ssim": [], "lpips": []}
+        with torch.no_grad():
+            for cam in test_cameras:
+                render_pkg = self._render(cam)
+                m = self._metric_values(render_pkg, cam)
+                for k in results:
+                    if m.get(k) is not None:
+                        results[k].append(m[k])
+        self.model.train()
+
+        summary = {
+            "num_test_views": len(test_cameras),
+            "psnr":  round(float(np.mean(results["psnr"])), 4)  if results["psnr"]  else None,
+            "ssim":  round(1.0 - float(np.mean(results["ssim"])), 4) if results["ssim"] else None,
+            "lpips": round(float(np.mean(results["lpips"])), 4) if results["lpips"] else None,
+            "num_gaussians": int(self.model.get_xyz.shape[0]),
+            "iterations": self.iterations,
+        }
+        out_path = Path(self.model_path) / "exports" / "metrics.json"
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        import json
+        out_path.write_text(json.dumps(summary, indent=2))
+        log.info("[Trainer] Metrics written to %s : %s", out_path, summary)
 
     # ------------------------------------------------------------------
     # Optimizer

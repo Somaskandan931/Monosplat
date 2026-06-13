@@ -88,6 +88,10 @@ class ColmapDataset(Dataset):
 
         self.views.sort(key=lambda x: x.image_id)
 
+        # Train/test split (3DGS convention): every 8th view held out for metrics
+        self.test_views  = self.views[7::8] if len(self.views) >= 8 else []
+        self.train_views = [v for v in self.views if v not in self.test_views]
+
         print(f"✅ Dataset: {len(self.views)} training views loaded")
 
         if len(self.views) == 0:
@@ -170,5 +174,9 @@ class ColmapDataset(Dataset):
         )
 
     def get_train_cameras(self) -> list:
-        """Return list of training view objects. Called by Trainer."""
-        return self.views
+        """Return list of training view objects (excludes held-out test views)."""
+        return self.train_views if self.train_views else self.views
+
+    def get_test_cameras(self) -> list:
+        """Return list of held-out view objects for metric evaluation."""
+        return self.test_views
