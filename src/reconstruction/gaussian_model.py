@@ -66,7 +66,7 @@ class GaussianModel(nn.Module):
     @property
     def get_scaling(self) -> Tensor:
         return torch.exp(
-            torch.clamp(self._scales, min=-4.0, max=self._max_log_scale)
+            torch.clamp(self._scales, min=-10.0, max=self._max_log_scale)
         )
 
     @property
@@ -149,7 +149,7 @@ class GaussianModel(nn.Module):
         dist2 = dist2.clamp(min=1e-7)
         scales_init = torch.log(torch.sqrt(dist2))[..., None].repeat(1, 3)
         scales_init = scales_init.clamp(
-            min=-4.0, max=self._max_log_scale
+            min=-10.0, max=self._max_log_scale
         )
 
         # Unit quaternions (no rotation)
@@ -338,7 +338,7 @@ class GaussianModel(nn.Module):
         new_xyz = (R_mats @ samples.unsqueeze(-1)).squeeze(-1) \
                   + self._xyz[selected].repeat(N, 1)
 
-        new_scales = torch.log(scales).clamp(-4.0, self._max_log_scale)
+        new_scales = torch.log(scales).clamp(-10.0, self._max_log_scale)
 
         new_tensors = {
             "xyz":      new_xyz,
