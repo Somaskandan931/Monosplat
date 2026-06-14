@@ -153,9 +153,8 @@ class Trainer:
 
             self._maybe_densify(iteration)
 
-            if iteration % self.opacity_reset_interval == 0:
-                if hasattr(self.model, "reset_opacity"):
-                    self.model.reset_opacity()
+            # NOTE: periodic opacity reset is handled inside _maybe_densify
+            # (with optimizer state reset) — do not duplicate it here.
 
             # SH degree schedule — activate one band every 1000 iters
             if iteration % 1000 == 0:
@@ -411,7 +410,7 @@ class Trainer:
         # Periodic opacity reset (standard 3DGS anti-floater/anti-needle trick).
         # Runs independent of the densify_from/until window check below so it
         # still fires even on the boundary iterations.
-        if iteration % 3000 == 0 and iteration < self.densify_until_iter:
+        if iteration % self.opacity_reset_interval == 0 and iteration < self.densify_until_iter:
             log.info(f"[Trainer] Resetting opacities at iter {iteration}")
             self.model.reset_opacity(self.optimizer)
 
@@ -461,7 +460,10 @@ class Trainer:
             max_screen  = 0
         elif iteration < self.densify_until_iter:
             min_opacity = 0.0001
-            grad_thresh = 0.00005
+            grad_thresh = 0.00012  # was 0.00005 — that produced +40-55k Gaussians
+                                    # every ~1000-1400 iters, immediately followed
+                                    # by a 20% prune at max_gaussians (thrashing,
+                                    # see training.log iters 11700-16000).
             max_screen  = 0
         else:
             min_opacity = 0.0005

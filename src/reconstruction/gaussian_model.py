@@ -177,23 +177,6 @@ class GaussianModel(nn.Module):
     # Opacity reset (called by Trainer every opacity_reset_interval iters)
     # ------------------------------------------------------------------
 
-    def reset_opacity(self, reset_value: float = 0.05) -> None:
-        """
-        Reset all opacities to a low floor with small per-Gaussian jitter.
-
-        The jitter prevents Adam from treating all Gaussians identically after
-        the reset (which kills gradient signal and causes opacity collapse).
-        """
-        with torch.no_grad():
-            target_logit = _inverse_sigmoid(
-                torch.tensor(reset_value, dtype=torch.float32)
-            ).item()
-            self._opacities.data.fill_(target_logit)
-            # ±0.05 logit jitter — small enough that all opacities stay near
-            # the floor, but large enough for the optimiser to differentiate them
-            jitter = (torch.rand_like(self._opacities) - 0.5) * 0.1
-            self._opacities.data.add_(jitter)
-
     # ------------------------------------------------------------------
     # Gradient accumulation
     # ------------------------------------------------------------------
@@ -253,12 +236,20 @@ class GaussianModel(nn.Module):
         gradient descent "re-earn" opacity only for Gaussians that genuinely
         improve the render, pruning away needle/floater Gaussians that had
         drifted to high opacity without contributing real detail.
+
+        A small per-Gaussian logit jitter is applied after the reset so Adam
+        does not see every Gaussian as identical (which would otherwise kill
+        per-Gaussian gradient differentiation and stall appearance learning).
         """
         with torch.no_grad():
             target = _inverse_sigmoid(
                 torch.full_like(self._opacities, value)
             )
             self._opacities.data.copy_(target)
+            # ±0.05 logit jitter — keeps opacities near the floor while giving
+            # the optimiser distinct starting points per Gaussian.
+            jitter = (torch.rand_like(self._opacities) - 0.5) * 0.1
+            self._opacities.data.add_(jitter)
 
         if optimizer is not None:
             for group in optimizer.param_groups:

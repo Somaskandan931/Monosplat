@@ -82,9 +82,16 @@ training:
   densification_interval: 200
   densify_grad_threshold: 0.0003
 
-  # Max cap after densification. 150k is the T4 safety ceiling when LPIPS+rasterizer
-  # buffers are co-resident; 200k causes OOM at iter ~2500 on 14 GB VRAM.
-  max_gaussians: 120000
+  # Max cap after densification. Raised from 120k -> 180k to stop the
+  # densify(+45-55k)/prune(-20%) thrash seen every ~1000-1400 iters in
+  # training.log (N oscillated 98k<->170k repeatedly). Peaks during the
+  # 06-14 run reached ~170k without OOM, so 180k leaves headroom while
+  # letting newly split/cloned Gaussians survive long enough to mature.
+  max_gaussians: 180000
+
+  # densify_until_iter extended so densification doesn't go fully idle for
+  # the final 4000 iters (N was frozen at 98,981 from iter 16000-20000).
+  densify_until_iter: 18000
 
   lambda_opacity_reg: 0.001
   lambda_dssim: 0.2           # [FIX-4] standard 3DGS paper value
