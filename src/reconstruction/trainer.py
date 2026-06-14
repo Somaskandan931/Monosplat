@@ -187,7 +187,7 @@ class Trainer:
             log.warning("[Trainer] No held-out test views — skipping metrics.")
             return
 
-        self.model.eval()
+        self.model.train(False)  # keep params accessible; eval() breaks SH rendering
         results = {"psnr": [], "ssim": [], "lpips": []}
         with torch.no_grad():
             for cam in test_cameras:
@@ -201,7 +201,7 @@ class Trainer:
         summary = {
             "num_test_views": len(test_cameras),
             "psnr":  round(float(np.mean(results["psnr"])), 4)  if results["psnr"]  else None,
-            "ssim":  round(1.0 - float(np.mean(results["ssim"])), 4) if results["ssim"] else None,
+            "ssim":  round(float(np.mean(results["ssim"])), 4) if results["ssim"] else None,
             "lpips": round(float(np.mean(results["lpips"])), 4) if results["lpips"] else None,
             "num_gaussians": int(self.model.get_xyz.shape[0]),
             "iterations": self.iterations,
